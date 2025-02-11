@@ -1,6 +1,7 @@
 bl_info = {
-    "name": "Light Editor Addon",
-    "author": "Your Name",
+    "name": "Light Editor",
+    "author": "Robert Rioux aka Blender Bob",
+    "location": "3Dview > Light Editor",
     "version": (1, 0, 0),
     "blender": (3, 0, 0),
     "description": "A Light Editor and Light Linking addon",
