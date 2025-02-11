@@ -178,83 +178,81 @@ def update_light_group(self, context):
 # 2) Extra parameters drawing function (unchanged)
 # -------------------------------------------------------------------------
 def draw_extra_params(box, obj, light):
-    if light.type in {'POINT', 'SPOT'}:
-        row = box.row(align=True)
-        row.label(text="Soft Falloff:")
-        row.prop(light, "soft_falloff", text="")
-        row = box.row(align=True)
-        row.label(text="Radius:")
-        row.prop(light, "shadow_soft_size", text="")
-        row = box.row(align=True)
-        row.label(text="Max Bounce:")
-        row.prop(light, "max_bounce", text="")
-        row = box.row(align=True)
-        row.label(text="Cast Shadow:")
-        row.prop(light, "use_shadow", text="")
-        row = box.row(align=True)
-        row.label(text="Multiple Inst:")
-        row.prop(light, "multiple_instance", text="")
-        row = box.row(align=True)
-        row.label(text="Shadow Caustic:")
-        row.prop(light, "shadow_caustic", text="")
-        if light.type == 'SPOT':
-            row = box.row(align=True)
-            row.label(text="Spot Size:")
-            row.prop(light, "spot_size", text="")
-            row = box.row(align=True)
-            row.label(text="Blende:")
-            row.prop(light, "spot_blend", text="")
-            row = box.row(align=True)
-            row.label(text="Show Cone:")
-            row.prop(light, "show_cone", text="")
-    elif light.type == 'SUN':
-        row = box.row(align=True)
-        row.label(text="Angle:")
-        row.prop(light, "angle", text="")
-        row = box.row(align=True)
-        row.label(text="Max Bounce:")
-        row.prop(light, "max_bounce", text="")
-        row = box.row(align=True)
-        row.label(text="Cast Shadow:")
-        row.prop(light, "use_shadow", text="")
-        row = box.row(align=True)
-        row.label(text="Multiple Inst:")
-        row.prop(light, "multiple_instance", text="")
-        row = box.row(align=True)
-        row.label(text="Shadow Caustic:")
-        row.prop(light, "shadow_caustic", text="")
-    elif light.type == 'AREA':
-        row = box.row(align=True)
-        row.label(text="Shape:")
-        row.prop(light, "shape", text="")
-        row = box.row(align=True)
-        row.label(text="Size X:")
-        row.prop(light, "size", text="")
-        row = box.row(align=True)
-        row.label(text="Size Y:")
-        row.prop(light, "size_y", text="")
-        row = box.row(align=True)
-        row.label(text="Max Bounce:")
-        row.prop(light, "max_bounce", text="")
-        row = box.row(align=True)
-        row.label(text="Cast Shadow:")
-        row.prop(light, "use_shadow", text="")
-        row = box.row(align=True)
-        row.label(text="Multi Imp:")
-        row.prop(light, "use_multiple_importance", text="")
-        row = box.row(align=True)
-        row.label(text="Shadow Caustics:")
-        row.prop(light, "shadow_caustic", text="")
-        row = box.row(align=True)
-        row.label(text="Portal:")
-        if hasattr(light, "cycles"):
-            row.prop(light.cycles, "is_portal", text="")
-        else:
-            row.label(text="-")
-        row = box.row(align=True)
-        row.label(text="Spread:")
-        row.prop(light, "spread", text="")
+    # Split the box into two columns
+    split = box.split(factor=0.5)  # 50% width for each column
+    col_left = split.column(align=True)  # Left column for titles
+    col_right = split.column(align=True)  # Right column for controls
 
+    if light.type in {'POINT', 'SPOT'}:
+        # Left column: Titles aligned to the right
+        col_left.alignment = 'RIGHT'
+        col_left.label(text="Soft Falloff")
+        col_left.label(text="Radius")
+        col_left.label(text="Max Bounce")
+        col_left.label(text="Cast Shadow")
+        col_left.label(text="Multiple Inst")
+        col_left.label(text="Shadow Caustic")
+        
+        if light.type == 'SPOT':
+            col_left.label(text="Spot Size")
+            col_left.label(text="Blende")
+            col_left.label(text="Show Cone")
+
+        # Right column: Controls aligned to the left
+        col_right.prop(light, "soft_falloff", text="")
+        col_right.prop(light, "shadow_soft_size", text="")
+        col_right.prop(light, "max_bounce", text="")
+        col_right.prop(light, "use_shadow", text="")
+        col_right.prop(light, "multiple_instance", text="")
+        col_right.prop(light, "shadow_caustic", text="")
+        
+        if light.type == 'SPOT':
+            col_right.prop(light, "spot_size", text="")
+            col_right.prop(light, "spot_blend", text="")
+            col_right.prop(light, "show_cone", text="")
+
+    elif light.type == 'SUN':
+        # Left column: Titles aligned to the right
+        col_left.alignment = 'RIGHT'
+        col_left.label(text="Angle")
+        col_left.label(text="Max Bounce")
+        col_left.label(text="Cast Shadow")
+        col_left.label(text="Multiple Inst")
+        col_left.label(text="Shadow Caustic")
+
+        # Right column: Controls aligned to the left
+        col_right.prop(light, "angle", text="")
+        col_right.prop(light, "max_bounce", text="")
+        col_right.prop(light, "use_shadow", text="")
+        col_right.prop(light, "multiple_instance", text="")
+        col_right.prop(light, "shadow_caustic", text="")
+
+    elif light.type == 'AREA':
+        # Left column: Titles aligned to the right
+        col_left.alignment = 'RIGHT'
+        col_left.label(text="Shape")
+        col_left.label(text="Size X")
+        col_left.label(text="Size Y")
+        col_left.label(text="Max Bounce")
+        col_left.label(text="Cast Shadow")
+        col_left.label(text="Multi Imp")
+        col_left.label(text="Shadow Caustics")
+        col_left.label(text="Portal")
+        col_left.label(text="Spread")
+
+        # Right column: Controls aligned to the left
+        col_right.prop(light, "shape", text="")
+        col_right.prop(light, "size", text="")
+        col_right.prop(light, "size_y", text="")
+        col_right.prop(light, "max_bounce", text="")
+        col_right.prop(light, "use_shadow", text="")
+        col_right.prop(light, "use_multiple_importance", text="")
+        col_right.prop(light, "shadow_caustic", text="")
+        if hasattr(light, "cycles"):
+            col_right.prop(light.cycles, "is_portal", text="")
+        else:
+            col_right.label(text="-")
+        col_right.prop(light, "spread", text="")
 # -------------------------------------------------------------------------
 # 3) Operator: Add Lightgroup
 # This operator now works even if no light is selected.
