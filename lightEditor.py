@@ -348,6 +348,24 @@ def draw_extra_params(self, box, obj, light):
                 col.prop(light, "contact_shadow_bias", text="Bias")
                 col.prop(light, "contact_shadow_thickness", text="Thickness")
 
+# -------------------------------------------------------------------------
+# Render layer menu
+# -------------------------------------------------------------------------
+
+def get_render_layer_items(self, context):
+    """Return a list of render layer items for the EnumProperty."""
+    items = []
+    for view_layer in context.scene.view_layers:
+        items.append((view_layer.name, view_layer.name, ""))
+    return items
+
+def update_render_layer(self, context):
+    selected = self.selected_render_layer
+    # Iterate over the scene’s view layers:
+    for vl in context.scene.view_layers:
+        if vl.name == selected:
+            context.window.view_layer = vl
+            break
 
 # -------------------------------------------------------------------------
 # 3) Operator: Add Lightgroup
@@ -678,22 +696,18 @@ class LIGHT_PT_editor(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        
+                
         layout.row().prop(scene, "filter_light_types", expand=True)
         layout.use_property_split = True
         layout.use_property_decorate = False  # No animation.
 
-        
-        # Top toggles with new labels.
-        # row = layout.row(align=True)
-        # row.prop(scene, "light_editor_kind_alpha", text="By Kind")
-        # row.prop(scene, "light_editor_group_by_collection", text="By Collections")
-        # row.prop(scene, "light_editor_light_group", text="By Light Groups")
-        
-
         row = layout.row(align=True)
         row.prop(scene, "light_editor_filter", text="", icon="VIEWZOOM")
         row.operator("le.clear_light_filter", text="", icon='PANEL_CLOSE')
+        
+        # Add the dropdown menu for render layers
+        row = layout.row()
+        row.prop(scene, "selected_render_layer", text="Render Layer")
 
         # Only show these rows if in Light Group mode.
         if scene.filter_light_types == 'GROUP':
@@ -910,7 +924,13 @@ def register():
     # Register scene properties
     bpy.types.Scene.current_active_light = bpy.props.PointerProperty(type=bpy.types.Object)
     bpy.types.Scene.current_exclusive_group = bpy.props.StringProperty()
-
+    bpy.types.Scene.selected_render_layer = EnumProperty(
+        name="Render Layer",
+        description="Select the render layer",
+        items=get_render_layer_items,  # Your function that lists view layers.
+        update=update_render_layer
+    )
+    
     # Register other classes and properties
     for cls in classes:
         bpy.utils.register_class(cls)
@@ -997,7 +1017,7 @@ def register():
     )
     bpy.types.Object.light_expanded = BoolProperty(
         name="Expanded",
-        default=False  # Ensure this is False by default
+        default=False  
     )
 
     #add handler post load > see @persistent
@@ -1014,7 +1034,8 @@ def unregister():
     # Unregister scene properties
     del bpy.types.Scene.current_active_light
     del bpy.types.Scene.current_exclusive_group
-
+    del bpy.types.Scene.selected_render_layer
+    
     # Unregister other classes and properties
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
