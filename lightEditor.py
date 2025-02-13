@@ -593,15 +593,20 @@ class LIGHT_OT_SelectLight(bpy.types.Operator):
         # Get the view layer objects
         vob = context.view_layer.objects
 
-        # Deselect all objects first
-        bpy.ops.object.select_all(action='DESELECT')
-
-        # Select the specified light
+        # Check if the light is already selected
         if self.name in vob:
             light = vob[self.name]
-            light.select_set(True)
-            vob.active = light  # Set the light as the active object
-            self.report({'INFO'}, f"Selected light: {self.name}")
+            if light.select_get():  # If the light is already selected
+                # Deselect everything
+                bpy.ops.object.select_all(action='DESELECT')
+                self.report({'INFO'}, f"Deselected all objects")
+            else:
+                # Deselect all objects first
+                bpy.ops.object.select_all(action='DESELECT')
+                # Select the specified light
+                light.select_set(True)
+                vob.active = light  # Set the light as the active object
+                self.report({'INFO'}, f"Selected light: {self.name}")
         else:
             self.report({'ERROR'}, f"Light '{self.name}' not found")
 
