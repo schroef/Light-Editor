@@ -9,7 +9,7 @@ from bpy.props import (
 )
 from bpy.app.handlers import persistent
 from bpy.app.translations import contexts as i18n_contexts
-import re, os
+import re
 
 # Global variables to track active checkboxes
 current_active_light = None
@@ -21,28 +21,6 @@ group_lights_original_state = {} # Stores original light states for each group
 group_checkbox_2_state = {}      # Second button on/off per group_key (OFF by default)
 other_groups_original_state = {} # Stores other groups' states
 group_collapse_dict = {}         # Whether each group is collapsed
-
-
-# -------------------------------------------------------------------------
-# Load light linking editor
-# -------------------------------------------------------------------------
-# DONT USE THIS!!!
-# class LIGHT_OT_LoadLinkingEditor(bpy.types.Operator):
-#     """Load the Light Linking Editor UI"""
-#     bl_idname = "light_editor.load_linking_editor"
-#     bl_label = "Load Light Linking Editor"
-
-#     def execute(self, context):
-#         import importlib
-#         from . import Linking  # Adjust this import if necessary
-#         importlib.reload(Linking)
-#         # Unregister the current panel so the Linking UI can take over.
-#         bpy.utils.unregister_class(LIGHT_PT_editor)
-#         # Register the Linking UI (assuming Linking.py defines its own register() function)
-#         Linking.register()
-#         return {'FINISHED'}
-
-
 
 # -------------------------------------------------------------------------
 # Add a new operator for deleting a light group
@@ -90,7 +68,7 @@ def get_light_groups(context):
     for obj in context.view_layer.objects:
         if obj.type == 'LIGHT':
             # Try the new property; if empty, fallback to old property.
-            group_val = getattr(obj, "lightgroup", "")
+            group_val = getattr(obj, "custom_lightgroup", "")
             if not group_val:
                 group_val = getattr(obj, "lightgroup", "")
             if group_val:
@@ -104,6 +82,14 @@ def get_light_groups(context):
                 groups[g] = []  # no lights assigned yet
     return groups
 
+def get_light_group_items(self, context):
+    """Return a list of custom light group items for the EnumProperty."""
+    items = [("NoGroup", "No Group", "")]
+    groups = get_light_groups(context)  # Pass context to get_light_groups
+    for group_name in groups.keys():
+        if group_name != "NoGroup":
+            items.append((group_name, group_name, ""))
+    return items
 def get_light_group_items(self, context):
     """Return a list of custom light group items for the EnumProperty."""
     items = [("NoGroup", "No Group", "")]
@@ -247,23 +233,26 @@ def draw_extra_params(self, box, obj, light):
         if light.type == 'AREA':
             col.prop(clamp, "is_portal", text="Portal")
 
-        if light.type == 'SPOT':
-            col.separator()
-            # Create a new row for the label and center-align it
-            row = col.row(align=True)
-            row.alignment = 'CENTER'
-            row.label(text="Spot Shape")
-            col.prop(light, "spot_size", text="Beam Size")
-            col.prop(light, "spot_blend", text="Blend", slider=True)
-            col.prop(light, "show_cone")
+    if light.type == 'SPOT':
+        col.separator()
+        
+        # Create a new row for the label and center-align it
+        row = col.row(align=True)
+        row.alignment = 'CENTER'
+        row.label(text="Spot Shape")
+        
+        # Reset alignment for the properties
+        col.alignment = 'RIGHT'
+        col.prop(light, "spot_size", text="Beam Size")
+        col.prop(light, "spot_blend", text="Blend", slider=True)
+        col.prop(light, "show_cone")
 
-        elif light.type == 'AREA':
-            col.separator()
-            # Create a new row for the label and center-align it
-            row = col.row(align=True)
-            row.alignment = 'CENTER'
-            row.label(text="Beam Shape")
-            col.prop(light, "spread", text="Spread")
+    elif light.type == 'AREA':
+        col.separator()
+        row = col.row(align=True)
+        row.alignment = 'CENTER'
+        row.label(text="Beam Shape")
+        col.prop(light, "spread", text="Spread")
 
     # EEVEE
     # Compact layout for node editor
@@ -310,13 +299,12 @@ def draw_extra_params(self, box, obj, light):
         # Spot Shape
         if (light and light.type == 'SPOT'):
             col.separator()
-            # Create a new row for the label and center-align it
             row = col.row(align=True)
             row.alignment = 'CENTER'
             row.label(text="Spot Shape")
+            
             col.prop(light, "spot_size", text="Size")
             col.prop(light, "spot_blend", text="Blend", slider=True)
-
             col.prop(light, "show_cone")
 
         # Shadows
@@ -335,10 +323,8 @@ def draw_extra_params(self, box, obj, light):
             if (light and light.type == 'SUN'):
 
                 col.separator()
-                # Create a new row for the label and center-align it
-                row = col.row(align=True)
-                row.alignment = 'CENTER'
-                row.label(text="Cascaded Shadow Map")
+                col.alignment = 'RIGHT'
+                col.label(text="Cascaded Shadow Map")
                 col.prop(light, "shadow_cascade_count", text="Count")
                 col.prop(light, "shadow_cascade_fade", text="Fade")
 
@@ -362,6 +348,24 @@ def draw_extra_params(self, box, obj, light):
                 col.prop(light, "contact_shadow_bias", text="Bias")
                 col.prop(light, "contact_shadow_thickness", text="Thickness")
 
+# -------------------------------------------------------------------------
+# Render layer menu
+# -------------------------------------------------------------------------
+
+def get_render_layer_items(self, context):
+    """Return a list of render layer items for the EnumProperty."""
+    items = []
+    for view_layer in context.scene.view_layers:
+        items.append((view_layer.name, view_layer.name, ""))
+    return items
+
+def update_render_layer(self, context):
+    selected = self.selected_render_layer
+    # Iterate over the scene’s view layers:
+    for vl in context.scene.view_layers:
+        if vl.name == selected:
+            context.window.view_layer = vl
+            break
 
 # -------------------------------------------------------------------------
 # 3) Operator: Add Lightgroup
@@ -597,11 +601,11 @@ class LIGHT_OT_ClearFilter(bpy.types.Operator):
 
 
 class LIGHT_OT_SelectLight(bpy.types.Operator):
-    """Selects light from UI"""
+    """Selects light from UI and deselects everything else"""
     bl_idname = "le.select_light"
-    bl_label = "Clear Filter"
+    bl_label = "Select Light"
 
-    name : StringProperty()
+    name: bpy.props.StringProperty()  # Name of the light to select
 
     def execute(self, context):
         # Get the view layer objects
@@ -627,31 +631,23 @@ class LIGHT_OT_SelectLight(bpy.types.Operator):
         return {'FINISHED'}
 
 
-
 # -------------------------------------------------------------------------
 # 4) The main row UI: use custom_lightgroup property when in Light Group mode
 # -------------------------------------------------------------------------
 def draw_main_row(box, obj):
     light = obj.data
-    context = bpy.context
     scene = bpy.context.scene
     row = box.row(align=True)
     controls_row = row.row(align=True)
     
     # The enabled and "turn off others" toggles remain:
     controls_row.prop(obj, "light_enabled", text="",
-            icon="OUTLINER_OB_LIGHT" if obj.light_enabled else "LIGHT_DATA")
+                      icon="OUTLINER_OB_LIGHT" if obj.light_enabled else "LIGHT_DATA")
     controls_row.active = obj.light_enabled == True                  
     controls_row.prop(obj, "light_turn_off_others", text="",
-            icon="RADIOBUT_ON" if obj.light_turn_off_others else "RADIOBUT_OFF")
-
-    if not scene.filter_light_types == 'GROUP':
-        selected_true = custom_icons["SELECT_TRUE"].icon_id
-        selected_false = custom_icons["SELECT_FALSE"].icon_id
-        controls_row.operator("le.select_light", text="", 
-                icon_value=selected_true if obj.select_get() == True else selected_false).name = obj.name
-    # controls_row.operator("le.select_light", text="",
-    #                   icon="OBJECT_DATA" if obj.select_get() == True else "LAYER_USED").name = obj.name
+                      icon="RADIOBUT_ON" if obj.light_turn_off_others else "RADIOBUT_OFF")
+    controls_row.operator("le.select_light", text="",
+                      icon="ORIENTATION_GLOBAL" if obj.select_get() == True else "LAYER_ACTIVE").name = obj.name
 
     # -- Only show the triangle if NOT in Light Group mode --
     if not scene.filter_light_types == 'GROUP':
@@ -665,21 +661,8 @@ def draw_main_row(box, obj):
 
     if scene.filter_light_types == 'GROUP':
         col_group = row.column(align=True)
-        # col_group.scale_x = 0.6
-        # col_group.prop(obj, "custom_lightgroup_menu", text="")
-        
-        # Copied fron object properties
-        view_layer = context.view_layer
-        
-        row = col_group.row(align=True)
-
-        sub = row.column(align=True)
-        sub.prop_search(obj, "lightgroup", view_layer, "lightgroups", text="", results_are_suggestions=True)
-        
-        sub = row.column(align=True)
-        sub.enabled = bool(obj.lightgroup) and not any(lg.name == obj.lightgroup for lg in view_layer.lightgroups)
-        sub.operator("scene.view_layer_add_lightgroup", icon='ADD', text="").name = obj.lightgroup
-
+        col_group.scale_x = 0.6
+        col_group.prop(obj, "custom_lightgroup_menu", text="")
     else:
         col_color = row.column(align=True)
         col_color.scale_x = 0.25
@@ -713,52 +696,31 @@ class LIGHT_PT_editor(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        
+                
         layout.row().prop(scene, "filter_light_types", expand=True)
         layout.use_property_split = True
         layout.use_property_decorate = False  # No animation.
 
-        
-        # Top toggles with new labels.
-        # row = layout.row(align=True)
-        # row.prop(scene, "light_editor_kind_alpha", text="By Kind")
-        # row.prop(scene, "light_editor_group_by_collection", text="By Collections")
-        # row.prop(scene, "light_editor_light_group", text="By Light Groups")
-        
-
         row = layout.row(align=True)
         row.prop(scene, "light_editor_filter", text="", icon="VIEWZOOM")
         row.operator("le.clear_light_filter", text="", icon='PANEL_CLOSE')
+        
+        # Only display the render layer dropdown when in Collection mode.
+        if scene.filter_light_types == 'COLLECTION':
+            row = layout.row()
+            row.prop(scene, "selected_render_layer", text="Render Layer")
 
         # Only show these rows if in Light Group mode.
         if scene.filter_light_types == 'GROUP':
-            # # Row for adding a new light group.
-            # row = layout.row(align=True)
-            # row.prop(scene, "create_new_lightgroup", text="")
-            # row.operator("light_editor.create_new_lightgroup", text="Add Lightgroup")
+            # Row for adding a new light group.
+            row = layout.row(align=True)
+            row.prop(scene, "create_new_lightgroup", text="")
+            row.operator("light_editor.create_new_lightgroup", text="Add Lightgroup")
 
-            # # Row for selecting and deleting a light group.
-            # row = layout.row(align=True)
-            # row.prop(scene, "light_editor_delete_group", text="")
-            # row.operator("light_editor.delete_light_group", text="Delete Light Group")
-
-            # copy from passes panel
-            view_layer = context.view_layer
-
-            # layout.label(text="Light Groups")
-            # layout.alignment = 'CENTER'
-            row = layout.row()
-            col = row.column()
-            col.template_list("UI_UL_list", "lightgroups", view_layer,
-                            "lightgroups", view_layer, "active_lightgroup_index", rows=3)
-
-            col = row.column()
-            sub = col.column(align=True)
-            sub.operator("scene.view_layer_add_lightgroup", icon='ADD', text="")
-            sub.operator("scene.view_layer_remove_lightgroup", icon='REMOVE', text="")
-            sub.separator()
-            sub.menu("VIEWLAYER_MT_lightgroup_sync", icon='DOWNARROW_HLT', text="")
-
+            # Row for selecting and deleting a light group.
+            row = layout.row(align=True)
+            row.prop(scene, "light_editor_delete_group", text="")
+            row.operator("light_editor.delete_light_group", text="Delete Light Group")
 
         # Get lights from the active view layer
         if scene.light_editor_filter:
@@ -857,11 +819,11 @@ class LIGHT_PT_editor(bpy.types.Panel):
             groups = {}
             for obj in lights:
                 # Try the migrated property; fallback to old property if needed.
-                grp = getattr(obj, "lightgroup", "")
+                grp = getattr(obj, "custom_lightgroup", "")
                 if not grp:
                     grp = getattr(obj, "lightgroup", "")
                 if not grp:
-                    grp = "Not Assigned"
+                    grp = "NoGroup"
                 groups.setdefault(grp, []).append(obj)
             for grp_name, group_objs in groups.items():
                 group_key = f"group_{grp_name}"
@@ -883,6 +845,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                                            icon=icon_2,
                                            depress=is_on_2)
                 op_2.group_key = group_key
+                # You dont want to show, so no code
                 op_tri = header_row.operator("light_editor.toggle_group",
                                              text="",
                                              emboss=True,
@@ -892,11 +855,10 @@ class LIGHT_PT_editor(bpy.types.Panel):
                 if not collapsed:
                     for obj in group_objs:
                         draw_main_row(header_box, obj)
-                        # We dont show extra light props in this mode
-                        # if obj.light_expanded:
-                        #     extra_box = header_box.box()
-                        #     # extra_box.label(text="Extra Parameters:")
-                        #     draw_extra_params(self, extra_box, obj, obj.data)
+                        if obj.light_expanded:
+                            extra_box = header_box.box()
+                            # extra_box.label(text="Extra Parameters:")
+                            draw_extra_params(self, extra_box, obj, obj.data)
         else:
             # Alphabetical order mode
             sorted_lights = sorted(lights, key=lambda o: o.name.lower())
@@ -928,7 +890,6 @@ def LE_check_lights_enabled(dummy):
 def LE_clear_handler(dummy):
     context = bpy.context
     # Migration: for each light, if it has an old "lightgroup" attribute, migrate it.
-    # Migration: for each light, if it has an old "lightgroup" attribute, migrate it.
     if bpy and bpy.data:
         # print(bpy)
         # print(bpy.data)
@@ -936,11 +897,8 @@ def LE_clear_handler(dummy):
             if obj.type == 'LIGHT':
                 old_group = getattr(obj, "lightgroup", "")
                 if old_group:
-                    obj.lightgroup = old_group
-                obj.custom_lightgroup_menu = obj.lightgroup if obj.lightgroup else "NoGroup"
-                # if old_group:
-                #     obj.custom_lightgroup = old_group
-                # obj.custom_lightgroup_menu = obj.custom_lightgroup if obj.custom_lightgroup else "NoGroup"
+                    obj.custom_lightgroup = old_group
+                obj.custom_lightgroup_menu = obj.custom_lightgroup if obj.custom_lightgroup else "NoGroup"
 
                 # print(obj.name)
                 # Set enable correct
@@ -951,42 +909,29 @@ def LE_clear_handler(dummy):
             # self.hide_render = not self.light_enabled
 
 
-def icon_Load():
-    # importing icons
-    import bpy.utils.previews
-    global custom_icons
-    custom_icons = bpy.utils.previews.new()
-
-    # path to the folder where the icon is
-    # the path is calculated relative to this py file inside the addon folder
-    icons_dir = os.path.join(os.path.dirname(__file__), 'icons')
-
-    # load a preview thumbnail of a file and store in the previews collection
-    custom_icons.load("SELECT_TRUE", os.path.join(icons_dir, "select_true.png"), 'IMAGE')
-    custom_icons.load("SELECT_FALSE", os.path.join(icons_dir, "select_false.png"), 'IMAGE')
-
-# global variable to store icons in
-custom_icons = None
-
 # Register the new operator and property
 classes = (
     LIGHT_OT_ToggleGroup,
     LIGHT_OT_ToggleGroupAllOff,
     LIGHT_OT_ToggleGroupExclusive,
-    # LIGHT_OT_CreateNewLightgroup,
-    # LIGHT_OT_DeleteLightGroup,
-    # LIGHT_OT_LoadLinkingEditor, DONT USE THIS!!!!  # <-- Added here
+    LIGHT_OT_CreateNewLightgroup,
+    LIGHT_OT_DeleteLightGroup,
     LIGHT_OT_ClearFilter,
     LIGHT_OT_SelectLight,
     LIGHT_PT_editor,
 )
 
 def register():
-    icon_Load()
     # Register scene properties
     bpy.types.Scene.current_active_light = bpy.props.PointerProperty(type=bpy.types.Object)
     bpy.types.Scene.current_exclusive_group = bpy.props.StringProperty()
-
+    bpy.types.Scene.selected_render_layer = EnumProperty(
+        name="Render Layer",
+        description="Select the render layer",
+        items=get_render_layer_items,  # Your function that lists view layers.
+        update=update_render_layer
+    )
+    
     # Register other classes and properties
     for cls in classes:
         bpy.utils.register_class(cls)
@@ -1035,7 +980,7 @@ def register():
     bpy.types.Scene.filter_light_types = EnumProperty(
         name="Type",
         description="Filter light by type",
-        items=(('NO_FILTER', 'All', 'Show All no filter (Alphabetical)', 'NONE', 0), ('KIND', 'Kind', 'FIlter lights by Kind', 'LIGHT_DATA', 1),('COLLECTION', 'Collection', 'FIlter lights by Collections', 'OUTLINER_COLLECTION', 2),('GROUP', 'Group', 'Filter lights by Groups', 'GROUP', 3)),
+        items=(('NO_FILTER', 'All', 'Show All no filter (Alphabetical)', 'NONE', 0), ('KIND', 'Kind', 'FIlter lights by Kind', 'LIGHT_DATA', 1),('COLLECTION', 'Collection', 'FIlter lights by Collections', 'OUTLINER_COLLECTION', 2),('GROUP', 'Light Group', 'Filter lights by Groups', 'GROUP', 3)),
         update=update_light_types
     )
 
@@ -1073,7 +1018,7 @@ def register():
     )
     bpy.types.Object.light_expanded = BoolProperty(
         name="Expanded",
-        default=False  # Ensure this is False by default
+        default=False  
     )
 
     #add handler post load > see @persistent
@@ -1081,13 +1026,8 @@ def register():
     # bpy.app.handlers.depsgraph_update_post.append(LE_check_lights_enabled)
     bpy.app.handlers.load_post.append(LE_check_lights_enabled)
     
-    
-
 
 def unregister():
-    global custom_icons
-    bpy.utils.previews.remove(custom_icons)
-
     #removove handler post load > see @persistent
     bpy.app.handlers.load_post.remove(LE_clear_handler)
     bpy.app.handlers.load_post.remove(LE_check_lights_enabled)
@@ -1095,7 +1035,8 @@ def unregister():
     # Unregister scene properties
     del bpy.types.Scene.current_active_light
     del bpy.types.Scene.current_exclusive_group
-
+    del bpy.types.Scene.selected_render_layer
+    
     # Unregister other classes and properties
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
