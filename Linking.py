@@ -3,22 +3,6 @@ import bpy
 from bpy.app.handlers import persistent
 
 
-# DONT USE THIS!!!
-# class LL_OT_LoadLightEditor(bpy.types.Operator):
-#     """Load the original Light Editor UI"""
-#     bl_idname = "light_link.load_light_editor"
-#     bl_label = "Load Light Editor"
-
-#     def execute(self, context):
-#         import importlib
-#         from . import lightEditor  # Adjust the import as needed
-#         importlib.reload(lightEditor)
-#         # Unregister the current Linking panel so the Light Editor can be shown.
-#         bpy.utils.unregister_class(LL_PT_Panel)
-#         lightEditor.register()
-#         return {'FINISHED'}
-
-
 
 # -------------------------------------------------------------------
 #   Helper: Get Selected Collections from the Outliner
@@ -377,6 +361,18 @@ class LL_OT_Unlink(bpy.types.Operator):
             self.report({'WARNING'}, "No lights selected")
             return {'CANCELLED'}
         
+        # Gather selected meshes and meshes from selected collections
+        selected_meshes = [item.obj for item in scene.ll_mesh_items if item.selected and item.obj]
+        collection_meshes = []
+        for item in scene.ll_collection_items:
+            if item.selected and item.coll:
+                for obj in item.coll.all_objects:
+                    if obj.type == 'MESH':
+                        collection_meshes.append(obj)
+        
+        # Combine meshes uniquely by name
+        all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
+        
         total_removed = 0
         for light in selected_lights:
             group_name = light.get("light_linking_receiver_collection")
@@ -387,7 +383,7 @@ class LL_OT_Unlink(bpy.types.Operator):
                 continue
             removed = 0
             for obj in list(linking_group.objects):
-                if obj.name in [m_obj.name for m_obj in scene.ll_mesh_items if m_obj.selected]:
+                if obj.name in [m_obj.name for m_obj in all_meshes]:
                     linking_group.objects.unlink(obj)
                     removed += 1
             total_removed += removed
@@ -483,6 +479,18 @@ class LL_OT_ShadowUnlink(bpy.types.Operator):
             self.report({'WARNING'}, "No lights selected")
             return {'CANCELLED'}
 
+        # Gather selected meshes and meshes from selected collections
+        selected_meshes = [item.obj for item in scene.ll_mesh_items if item.selected and item.obj]
+        collection_meshes = []
+        for item in scene.ll_collection_items:
+            if item.selected and item.coll:
+                for obj in item.coll.all_objects:
+                    if obj.type == 'MESH':
+                        collection_meshes.append(obj)
+        
+        # Combine meshes uniquely by name
+        all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
+
         total_removed = 0
         for light in selected_lights:
             group_name = light.get("shadow_linking_blocker_collection")
@@ -497,7 +505,7 @@ class LL_OT_ShadowUnlink(bpy.types.Operator):
 
             removed = 0
             for obj in list(linking_group.objects):
-                if obj.name in [m_obj.name for m_obj in scene.ll_mesh_items if m_obj.selected]:
+                if obj.name in [m_obj.name for m_obj in all_meshes]:
                     try:
                         linking_group.objects.unlink(obj)
                         removed += 1
