@@ -583,21 +583,29 @@ class LIGHT_OT_ClearFilter(bpy.types.Operator):
 
 
 class LIGHT_OT_SelectLight(bpy.types.Operator):
-    """Selects light from UI"""
+    """Selects light from UI and deselects everything else"""
     bl_idname = "le.select_light"
-    bl_label = "Clear Filter"
+    bl_label = "Select Light"
 
-    name : StringProperty()
+    name: bpy.props.StringProperty()  # Name of the light to select
 
     def execute(self, context):
+        # Get the view layer objects
         vob = context.view_layer.objects
-        if vob[self.name].select_get() == False:
-            vob[self.name].select_set(True)
-            vob.active = vob[self.name]
-        else:
-            vob[self.name].select_set(False)
-        return {'FINISHED'}
 
+        # Deselect all objects first
+        bpy.ops.object.select_all(action='DESELECT')
+
+        # Select the specified light
+        if self.name in vob:
+            light = vob[self.name]
+            light.select_set(True)
+            vob.active = light  # Set the light as the active object
+            self.report({'INFO'}, f"Selected light: {self.name}")
+        else:
+            self.report({'ERROR'}, f"Light '{self.name}' not found")
+
+        return {'FINISHED'}
 
 
 # -------------------------------------------------------------------------
