@@ -705,9 +705,10 @@ class LIGHT_PT_editor(bpy.types.Panel):
         row.prop(scene, "light_editor_filter", text="", icon="VIEWZOOM")
         row.operator("le.clear_light_filter", text="", icon='PANEL_CLOSE')
         
-        # Add the dropdown menu for render layers
-        row = layout.row()
-        row.prop(scene, "selected_render_layer", text="Render Layer")
+        # Only display the render layer dropdown when in Collection mode.
+        if scene.filter_light_types == 'COLLECTION':
+            row = layout.row()
+            row.prop(scene, "selected_render_layer", text="Render Layer")
 
         # Only show these rows if in Light Group mode.
         if scene.filter_light_types == 'GROUP':
@@ -979,7 +980,7 @@ def register():
     bpy.types.Scene.filter_light_types = EnumProperty(
         name="Type",
         description="Filter light by type",
-        items=(('NO_FILTER', 'All', 'Show All no filter (Alphabetical)', 'NONE', 0), ('KIND', 'Kind', 'FIlter lights by Kind', 'LIGHT_DATA', 1),('COLLECTION', 'Collection', 'FIlter lights by Collections', 'OUTLINER_COLLECTION', 2),('GROUP', 'Group', 'Filter lights by Groups', 'GROUP', 3)),
+        items=(('NO_FILTER', 'All', 'Show All no filter (Alphabetical)', 'NONE', 0), ('KIND', 'Kind', 'FIlter lights by Kind', 'LIGHT_DATA', 1),('COLLECTION', 'Collection', 'FIlter lights by Collections', 'OUTLINER_COLLECTION', 2),('GROUP', 'Light Group', 'Filter lights by Groups', 'GROUP', 3)),
         update=update_light_types
     )
 
