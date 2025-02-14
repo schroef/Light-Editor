@@ -317,14 +317,20 @@ class LL_OT_Link(bpy.types.Operator):
         
         total_linked_meshes = 0
         for light in selected_lights:
+            if not light.visible_get():  # Check if the light is visible
+                self.report({'ERROR'}, f"Lights need to be visible for linking: {light.name}")
+                continue
+            
             bpy.ops.object.select_all(action='DESELECT')
             light.select_set(True)
             context.view_layer.objects.active = light
 
+            # Create or retrieve the light linking receiver collection
             group_name = light.get("light_linking_receiver_collection") or f"Light Linking for {light.name}"
             new_group = bpy.data.collections.get(group_name)
             if not new_group:
                 try:
+                    # Use the correct operator for light linking
                     bpy.ops.object.light_linking_receiver_collection_new()
                     group_name = light.get("light_linking_receiver_collection") or group_name
                     new_group = bpy.data.collections.get(group_name)
@@ -334,17 +340,21 @@ class LL_OT_Link(bpy.types.Operator):
                 except Exception as e:
                     self.report({'ERROR'}, f"Error creating linking group for {light.name}: {str(e)}")
                     continue
+
+            # Link meshes to the receiver collection
             linked_meshes = 0
             for obj in all_meshes:
                 if obj.name not in new_group.objects:
                     new_group.objects.link(obj)
                     linked_meshes += 1
+
+            # Store the receiver collection name in the light's custom properties
             light["light_linking_receiver_collection"] = group_name
             total_linked_meshes += linked_meshes
         
         self.report({'INFO'}, f"Linked {len(selected_lights)} light(s) to {total_linked_meshes} mesh(es)")
         return {'FINISHED'}
-
+    
 class LL_OT_Unlink(bpy.types.Operator):
     bl_idname = "light_link.unlink"
     bl_label = "Unlink Lights from Objects"
@@ -432,6 +442,10 @@ class LL_OT_ShadowLink(bpy.types.Operator):
 
         # For each light, create or retrieve the shadow linking blocker collection
         for light in selected_lights:
+            if not light.visible_get():  # Check if the light is visible
+                self.report({'ERROR'}, f"Lights need to be visible for linking: {light.name}")
+                continue
+            
             bpy.ops.object.select_all(action='DESELECT')
             light.select_set(True)
             context.view_layer.objects.active = light
