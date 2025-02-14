@@ -3,7 +3,6 @@ import bpy
 from bpy.app.handlers import persistent
 
 
-
 # -------------------------------------------------------------------
 #   Helper: Get Selected Collections from the Outliner
 # -------------------------------------------------------------------
@@ -556,6 +555,7 @@ class LL_PT_Panel(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "Light Editor"
+    bl_options = {'DEFAULT_CLOSED'}
     
     def draw(self, context):
         layout = self.layout
@@ -612,9 +612,7 @@ class LL_PT_Panel(bpy.types.Panel):
         shadow_link_row = layout.row(align=True)
         shadow_link_row.operator("light_link.shadow_link", text="Shadow Link")
         shadow_link_row.operator("light_link.shadow_unlink", text="Shadow Unlink")
-        
-        layout.separator()
-        layout.operator("light_link.load_light_editor", text="Light Editor", icon='FILE_SCRIPT')
+
 
 @persistent
 def LL_clear_handler(dummy):
@@ -648,7 +646,6 @@ classes = (
     LL_UL_LightList_UI,
     LL_UL_MeshList_UI,
     LL_UL_CollectionList_UI,
-    # LL_OT_LoadLightEditor,  # DONT USE THISE # <-- Ensure this operator is included!
     LL_PT_Panel,
 )
 
