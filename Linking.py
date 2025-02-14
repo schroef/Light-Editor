@@ -1,7 +1,5 @@
 import bpy
-
 from bpy.app.handlers import persistent
-
 
 # -------------------------------------------------------------------
 #   Helper: Get Selected Collections from the Outliner
@@ -22,6 +20,94 @@ def get_selected_collections(context):
                         selected.append(id_item)
     return selected
 
+# -------------------------------------------------------------------
+#   Helper Functions to Ensure BB_ Collections
+# -------------------------------------------------------------------
+def ensure_bb_collection(light, collection_type="light"):
+    """
+    For light linking, ensures that the collection with a BB_ prefix exists.
+    Expected name: "BB_Light Linking for <light name>"
+    """
+    prefix = "BB_"
+    if collection_type == "light":
+        prop_name = "light_linking_receiver_collection"
+        expected_name = f"{prefix}Light Linking for {light.name}"
+    else:
+        raise ValueError("Invalid collection type for ensure_bb_collection.")
+    
+    # Check if the collection already exists
+    bb_collection = bpy.data.collections.get(expected_name)
+    if bb_collection:
+        light[prop_name] = expected_name
+        return bb_collection
+
+    # Use the Blender operator to create the light linking collection
+    bpy.ops.object.select_all(action='DESELECT')
+    light.select_set(True)
+    bpy.context.view_layer.objects.active = light
+    bpy.ops.object.light_linking_receiver_collection_new()
+
+    # The operator creates a new collection and assigns it to the light's light_linking.receiver_collection
+    # We need to retrieve it from the light's properties
+    if hasattr(light, "light_linking") and hasattr(light.light_linking, "receiver_collection"):
+        new_collection = light.light_linking.receiver_collection
+        new_collection.name = expected_name  # Rename the collection to the expected name
+        light[prop_name] = expected_name
+        return new_collection
+    else:
+        raise RuntimeError(f"Failed to create light linking collection for {light.name}")
+
+# -------------------------------------------------------------------
+#   Create BB_ shadow linking collection (for shadows)
+# -------------------------------------------------------------------
+def ensure_shadow_collection(light):
+    """
+    For shadow linking, ensures that the collection with a BB_ prefix exists.
+    Expected name: "BB_Shadow Linking for <light name>"
+    """
+    prop_name = "shadow_linking_blocker_collection"
+    expected_name = f"BB_Shadow Linking for {light.name}"
+    shadow_collection = bpy.data.collections.get(expected_name)
+    if shadow_collection:
+        # Ensure the collection is assigned to the light's blocker_collection property
+        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+            light.light_linking.blocker_collection = shadow_collection
+        light[prop_name] = expected_name
+        return shadow_collection
+
+    # Ensure the light is selected and active
+    bpy.ops.object.select_all(action='DESELECT')
+    light.select_set(True)
+    bpy.context.view_layer.objects.active = light
+
+    # Call the operator to create the shadow linking collection
+    try:
+        bpy.ops.object.light_blocker_receiver_collection_new()
+    except Exception as e:
+        # Fallback: Manually create the collection if the operator fails
+        print(f"Operator failed: {e}. Falling back to manual collection creation.")
+        new_collection = bpy.data.collections.new(expected_name)
+        bpy.context.scene.collection.children.link(new_collection)
+        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+            light.light_linking.blocker_collection = new_collection
+        light[prop_name] = expected_name
+        return new_collection
+
+    # Retrieve the newly created collection from the light's properties
+    if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+        new_collection = light.light_linking.blocker_collection
+        new_collection.name = expected_name  # Rename the collection to the expected name
+        light[prop_name] = expected_name
+        return new_collection
+    else:
+        # Fallback: Manually create the collection if the property is not found
+        print("Failed to retrieve blocker_collection. Falling back to manual collection creation.")
+        new_collection = bpy.data.collections.new(expected_name)
+        bpy.context.scene.collection.children.link(new_collection)
+        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+            light.light_linking.blocker_collection = new_collection
+        light[prop_name] = expected_name
+        return new_collection
 # -------------------------------------------------------------------
 #   Property Groups for List Items (with multi-selection support)
 # -------------------------------------------------------------------
@@ -291,8 +377,8 @@ class LL_OT_Link(bpy.types.Operator):
     bl_idname = "light_link.link"
     bl_label = "Link Lights to Objects"
     bl_description = (
-        "For each selected light, create (or use an existing) light linking receiver collection and add "
-        "the selected meshes (including those from selected collections) to it, storing the linking group in a custom property."
+        "For each selected light, use the UI-selected BB_ light linking collection (or create it) and add "
+        "the selected meshes (from the Mesh and Collection lists) to it."
     )
     
     def execute(self, context):
@@ -310,6 +396,7 @@ class LL_OT_Link(bpy.types.Operator):
             self.report({'WARNING'}, "No lights selected")
             return {'CANCELLED'}
         
+        # Combine meshes uniquely (by object name)
         all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
         if not list(all_meshes):
             self.report({'WARNING'}, "No mesh objects selected")
@@ -317,50 +404,41 @@ class LL_OT_Link(bpy.types.Operator):
         
         total_linked_meshes = 0
         for light in selected_lights:
-            if not light.visible_get():  # Check if the light is visible
-                self.report({'ERROR'}, f"Lights need to be visible for linking: {light.name}")
+            if not light.visible_get():
+                self.report({'ERROR'}, f"Light must be visible for linking: {light.name}")
                 continue
             
             bpy.ops.object.select_all(action='DESELECT')
             light.select_set(True)
             context.view_layer.objects.active = light
 
-            # Create or retrieve the light linking receiver collection
-            group_name = light.get("light_linking_receiver_collection") or f"Light Linking for {light.name}"
-            new_group = bpy.data.collections.get(group_name)
+            # Ensure the BB_ collection exists
+            new_group = ensure_bb_collection(light, collection_type="light")
+            
             if not new_group:
-                try:
-                    # Use the correct operator for light linking
-                    bpy.ops.object.light_linking_receiver_collection_new()
-                    group_name = light.get("light_linking_receiver_collection") or group_name
-                    new_group = bpy.data.collections.get(group_name)
-                    if not new_group:
-                        self.report({'WARNING'}, f"Failed to create linking group '{group_name}' for {light.name}")
-                        continue
-                except Exception as e:
-                    self.report({'ERROR'}, f"Error creating linking group for {light.name}: {str(e)}")
-                    continue
+                self.report({'WARNING'}, f"Failed to create or retrieve linking group for {light.name}")
+                continue
 
-            # Link meshes to the receiver collection
             linked_meshes = 0
             for obj in all_meshes:
-                if obj.name not in new_group.objects:
+                if not new_group.objects.get(obj.name):
                     new_group.objects.link(obj)
                     linked_meshes += 1
 
-            # Store the receiver collection name in the light's custom properties
-            light["light_linking_receiver_collection"] = group_name
             total_linked_meshes += linked_meshes
         
         self.report({'INFO'}, f"Linked {len(selected_lights)} light(s) to {total_linked_meshes} mesh(es)")
         return {'FINISHED'}
-    
+
+# -------------------------------------------------------------------
+#   Operator for Light Unlinking
+# -------------------------------------------------------------------
 class LL_OT_Unlink(bpy.types.Operator):
     bl_idname = "light_link.unlink"
     bl_label = "Unlink Lights from Objects"
     bl_description = (
-        "For each selected light, remove the objects (from the Mesh and Collection lists) "
-        "that are linked via the light linking receiver collection and clear the linking property."
+        "For each selected light, remove objects (from the Mesh and Collection lists) that are linked "
+        "in the BB_ light linking collection."
     )
     
     def execute(self, context):
@@ -370,7 +448,6 @@ class LL_OT_Unlink(bpy.types.Operator):
             self.report({'WARNING'}, "No lights selected")
             return {'CANCELLED'}
         
-        # Gather selected meshes and meshes from selected collections
         selected_meshes = [item.obj for item in scene.ll_mesh_items if item.selected and item.obj]
         collection_meshes = []
         for item in scene.ll_collection_items:
@@ -379,46 +456,42 @@ class LL_OT_Unlink(bpy.types.Operator):
                     if obj.type == 'MESH':
                         collection_meshes.append(obj)
         
-        # Combine meshes uniquely by name
         all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
         
         total_removed = 0
         for light in selected_lights:
-            group_name = light.get("light_linking_receiver_collection")
-            if not group_name:
-                continue
-            linking_group = bpy.data.collections.get(group_name)
+            # Always use the BB_ collection.
+            linking_group = bpy.data.collections.get(f"BB_Light Linking for {light.name}")
             if not linking_group:
+                self.report({'WARNING'}, f"No BB_ linking group found for {light.name}")
                 continue
+
             removed = 0
             for obj in list(linking_group.objects):
                 if obj.name in [m_obj.name for m_obj in all_meshes]:
                     linking_group.objects.unlink(obj)
                     removed += 1
+
             total_removed += removed
             if "light_linking_receiver_collection" in light:
                 del light["light_linking_receiver_collection"]
+
         self.report({'INFO'}, f"Unlinked objects from {len(selected_lights)} light(s); removed {total_removed} object(s)")
         return {'FINISHED'}
 
 # -------------------------------------------------------------------
-#   Operators for Linking/Unlinking (Shadow Linking)
-#   These operators mirror the light linking operators but use a separate
-#   custom property and collection naming for shadow linking.
+#   Operator for Shadow Linking
 # -------------------------------------------------------------------
 class LL_OT_ShadowLink(bpy.types.Operator):
     bl_idname = "light_link.shadow_link"
     bl_label = "Shadow Link Lights to Objects"
     bl_description = (
-        "For each selected light, create (or use an existing) shadow linking blocker collection and add "
-        "the selected meshes (including those from selected collections) to it, storing the linking group "
-        "in a custom property on the light."
+        "For each selected light, use the UI-selected BB_ shadow linking collection (or create it) and add "
+        "the selected meshes (from the Mesh and Collection lists) to it."
     )
 
     def execute(self, context):
         scene = context.scene
-
-        # Gather selected lights, meshes, and collection meshes
         selected_lights = [item.obj for item in scene.ll_light_items if item.selected and item.obj]
         selected_meshes = [item.obj for item in scene.ll_mesh_items if item.selected and item.obj]
         collection_meshes = []
@@ -428,7 +501,6 @@ class LL_OT_ShadowLink(bpy.types.Operator):
                     if obj.type == 'MESH':
                         collection_meshes.append(obj)
 
-        # Combine meshes uniquely by name
         all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
 
         if not selected_lights:
@@ -440,49 +512,43 @@ class LL_OT_ShadowLink(bpy.types.Operator):
 
         total_linked_meshes = 0
 
-        # For each light, create or retrieve the shadow linking blocker collection
         for light in selected_lights:
-            if not light.visible_get():  # Check if the light is visible
-                self.report({'ERROR'}, f"Lights need to be visible for linking: {light.name}")
+            if not light.visible_get():
+                self.report({'ERROR'}, f"Light must be visible for linking: {light.name}")
                 continue
-            
+
             bpy.ops.object.select_all(action='DESELECT')
             light.select_set(True)
             context.view_layer.objects.active = light
 
-            group_name = light.get("shadow_linking_blocker_collection") or f"Shadow Linking for {light.name}"
-            new_group = bpy.data.collections.get(group_name)
+            # Ensure the BB_ shadow collection exists
+            new_group = ensure_shadow_collection(light)
+
             if not new_group:
-                try:
-                    bpy.ops.object.light_linking_blocker_collection_new()
-                    group_name = light.get("shadow_linking_blocker_collection") or group_name
-                    new_group = bpy.data.collections.get(group_name)
-                    if not new_group:
-                        self.report({'WARNING'}, f"Failed to create shadow linking group '{group_name}' for {light.name}")
-                        continue
-                except Exception as e:
-                    self.report({'ERROR'}, f"Error creating shadow linking group for {light.name}: {str(e)}")
-                    continue
+                self.report({'WARNING'}, f"Failed to create or retrieve shadow linking group for {light.name}")
+                continue
 
             linked_meshes = 0
             for obj in all_meshes:
-                if obj.name not in new_group.objects:
+                if not new_group.objects.get(obj.name):
                     new_group.objects.link(obj)
                     linked_meshes += 1
 
-            light["shadow_linking_blocker_collection"] = group_name
+            light["shadow_linking_blocker_collection"] = new_group.name
             total_linked_meshes += linked_meshes
 
         self.report({'INFO'}, f"Shadow Linked {len(selected_lights)} light(s) to {total_linked_meshes} mesh(es)")
         return {'FINISHED'}
 
-
+# -------------------------------------------------------------------
+#   Operator for Shadow Unlinking
+# -------------------------------------------------------------------
 class LL_OT_ShadowUnlink(bpy.types.Operator):
     bl_idname = "light_link.shadow_unlink"
     bl_label = "Shadow Unlink Lights from Objects"
     bl_description = (
-        "For each selected light, remove the objects (from the Mesh and Collection lists) that are linked "
-        "via the shadow linking blocker collection and clear the linking property."
+        "For each selected light, remove objects (from the Mesh and Collection lists) that are linked "
+        "in the BB_ shadow linking collection."
     )
 
     def execute(self, context):
@@ -492,7 +558,6 @@ class LL_OT_ShadowUnlink(bpy.types.Operator):
             self.report({'WARNING'}, "No lights selected")
             return {'CANCELLED'}
 
-        # Gather selected meshes and meshes from selected collections
         selected_meshes = [item.obj for item in scene.ll_mesh_items if item.selected and item.obj]
         collection_meshes = []
         for item in scene.ll_collection_items:
@@ -501,19 +566,15 @@ class LL_OT_ShadowUnlink(bpy.types.Operator):
                     if obj.type == 'MESH':
                         collection_meshes.append(obj)
         
-        # Combine meshes uniquely by name
         all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
 
         total_removed = 0
         for light in selected_lights:
-            group_name = light.get("shadow_linking_blocker_collection")
-            if not group_name:
-                self.report({'INFO'}, f"No shadow linking group found for light '{light.name}'")
-                continue
-
-            linking_group = bpy.data.collections.get(group_name)
+            # Always use the expected BB_ shadow linking collection.
+            expected_name = f"BB_Shadow Linking for {light.name}"
+            linking_group = bpy.data.collections.get(expected_name)
             if not linking_group:
-                self.report({'INFO'}, f"Shadow linking group '{group_name}' not found for light '{light.name}'")
+                self.report({'INFO'}, f"No shadow linking group '{expected_name}' found for light '{light.name}'")
                 continue
 
             removed = 0
@@ -531,7 +592,6 @@ class LL_OT_ShadowUnlink(bpy.types.Operator):
 
         self.report({'INFO'}, f"Shadow Unlinked objects from {len(selected_lights)} light(s); removed {total_removed} object(s)")
         return {'FINISHED'}
-
 # -------------------------------------------------------------------
 #   UIList Classes for Scrollable Lists
 # -------------------------------------------------------------------
@@ -539,7 +599,7 @@ class LL_UL_LightList_UI(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         self.use_filter_show = True
         row = layout.row(align=True)
-        row.prop(item, "selected", text="")  # Checkbox for selection
+        row.prop(item, "selected", text="")
         row.label(text=item.name)
 
 class LL_UL_MeshList_UI(bpy.types.UIList):
@@ -557,11 +617,7 @@ class LL_UL_CollectionList_UI(bpy.types.UIList):
         row.label(text=item.name)
 
 # -------------------------------------------------------------------
-#   Panel – Three Columns with the UILists on Top, a Shared List Height Slider,
-#   and the Operator Buttons (for each column) below the slider.
-#   The third row now has two rows:
-#     • The first row has the Light Link and Light Unlink buttons.
-#     • The second row adds the Shadow Link and Shadow Unlink buttons.
+#   Panel – UI Layout
 # -------------------------------------------------------------------
 class LL_PT_Panel(bpy.types.Panel):
     bl_label = "Light Link"
@@ -578,29 +634,23 @@ class LL_PT_Panel(bpy.types.Panel):
         # First row: UILists for Lights, Meshes, and Collections
         main_row = layout.row(align=True)
         
-        # Lights Column (only UIList)
         col_lights = main_row.column(align=True)
         col_lights.label(text="Lights")
         col_lights.template_list("LL_UL_LightList_UI", "", scene, "ll_light_items", scene, "ll_light_index", rows=scene.ll_list_rows)
         
-        # Meshes Column (only UIList)
         col_meshes = main_row.column(align=True)
         col_meshes.label(text="Meshes")
         col_meshes.template_list("LL_UL_MeshList_UI", "", scene, "ll_mesh_items", scene, "ll_mesh_index", rows=scene.ll_list_rows)
         
-        # Collections Column (only UIList)
         col_colls = main_row.column(align=True)
         col_colls.label(text="Collections")
         col_colls.template_list("LL_UL_CollectionList_UI", "", scene, "ll_collection_items", scene, "ll_collection_index", rows=scene.ll_list_rows)
         
         layout.separator()
-        # Shared slider for list height
         layout.prop(scene, "ll_list_rows", text="List Height")
-        
         layout.separator()
-        # Second row: Operator Buttons for each column below the slider
-        op_row = layout.row(align=True)
         
+        op_row = layout.row(align=True)
         col_light_ops = op_row.column(align=True)
         col_light_ops.operator("light_link.refresh_selected_lights", text="Selected Lights")
         col_light_ops.operator("light_link.refresh_all_lights", text="All Lights")
@@ -617,24 +667,19 @@ class LL_PT_Panel(bpy.types.Panel):
         col_coll_ops.operator("light_link.reset_collections", text="Reset")
         
         layout.separator()
-        # Third row: Link/Unlink Buttons
         link_row = layout.row(align=True)
         link_row.operator("light_link.link", text="Light Link")
         link_row.operator("light_link.unlink", text="Light Unlink")
         
-        # Fourth row: Shadow Link/Unlink Buttons
         shadow_link_row = layout.row(align=True)
         shadow_link_row.operator("light_link.shadow_link", text="Shadow Link")
         shadow_link_row.operator("light_link.shadow_unlink", text="Shadow Unlink")
-
 
 @persistent
 def LL_clear_handler(dummy):
     update_light_items(bpy.context.scene, bpy.context)
     update_mesh_items(bpy.context.scene, bpy.context)
     update_collection_items(bpy.context.scene, bpy.context)
-
-
 
 # -------------------------------------------------------------------
 #   Registration
@@ -663,7 +708,6 @@ classes = (
     LL_PT_Panel,
 )
 
-
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
@@ -680,9 +724,7 @@ def register():
         min=1,
         max=50
     )
-
     bpy.app.handlers.load_post.append(LL_clear_handler)
-
 
 def unregister():
     del bpy.types.Scene.ll_light_items
@@ -696,7 +738,6 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
-    #removove handler
     bpy.app.handlers.load_post.remove(LL_clear_handler)
     
 if __name__ == "__main__":
