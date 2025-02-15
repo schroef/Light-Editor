@@ -181,164 +181,114 @@ def use_mnee(context):
 # 2) Extra parameters drawing function (unchanged)
 # -------------------------------------------------------------------------
 def draw_extra_params(self, box, obj, light):
-    # layout = self.layout
-    # col = layout.column()
-    col = box.column()
+    # Draw the default light properties UI in the provided box
+    if light and isinstance(light, bpy.types.Light):
+        # Copy the layout drawing logic from DATA_PT_light
+        layout = box
 
-    col.prop(light, "color")
-    col.prop(light, "energy")
-    col.separator()
+        # Display the 4 light type buttons in a single row
+        row = layout.row()
+        row.prop(light, "type", expand=True)
 
-
-    # CYCLES
-    if bpy.context.engine == 'CYCLES':
-        clamp = light.cycles
-        if light.type in {'POINT', 'SPOT'}:
-            col.prop(light, "use_soft_falloff")
-            col.prop(light, "shadow_soft_size", text="Radius")
-        elif light.type == 'SUN':
-            col.prop(light, "angle")
-        elif light.type == 'AREA':
-            col.prop(light, "shape", text="Shape")
-            sub = col.column(align=True)
-
-            if light.shape in {'SQUARE', 'DISK'}:
-                sub.prop(light, "size")
-            elif light.shape in {'RECTANGLE', 'ELLIPSE'}:
-                sub.prop(light, "size", text="Size X")
-                sub.prop(light, "size_y", text="Y")
-
-        if not (light.type == 'AREA' and clamp.is_portal):
-            col.separator()
-            sub = col.column()
-            sub.prop(clamp, "max_bounces")
-
-        sub = col.column(align=True)
-        sub.active = not (light.type == 'AREA' and clamp.is_portal)
-        sub.prop(clamp, "cast_shadow")
-        sub.prop(clamp, "use_multiple_importance_sampling", text="Multiple Importance")
-        if use_mnee(bpy.context):
-            sub.prop(clamp, "is_caustics_light", text="Shadow Caustics")
-
-        if light.type == 'AREA':
-            col.prop(clamp, "is_portal", text="Portal")
-
-        if light.type == 'SPOT':
-            col.separator()
-            # Create a new row for the label and center-align it
-            row = col.row(align=True)
-            row.alignment = 'CENTER'
-            row.label(text="Spot Shape")
-            col.prop(light, "spot_size", text="Beam Size")
-            col.prop(light, "spot_blend", text="Blend", slider=True)
-            col.prop(light, "show_cone")
-
-        elif light.type == 'AREA':
-            col.separator()
-            # Create a new row for the label and center-align it
-            row = col.row(align=True)
-            row.alignment = 'CENTER'
-            row.label(text="Beam Shape")
-            col.prop(light, "spread", text="Spread")
-
-    # EEVEE
-    # Compact layout for node editor
-    if ((bpy.context.engine == 'BLENDER_EEVEE') or (bpy.context.engine =='BLENDER_EEVEE_NEXT')):
+        col = layout.column()
         col.separator()
-        col.prop(light, "diffuse_factor", text="Diffuse")
-        col.prop(light, "specular_factor", text="Specular")
-        col.prop(light, "volume_factor", text="Volume", text_ctxt=i18n_contexts.id_id)
 
-        col.separator()
-        if light.type in {'POINT', 'SPOT'}:
-            col.prop(light, "use_soft_falloff")
-            col.prop(light, "shadow_soft_size", text="Radius")
-        elif light.type == 'SUN':
-            col.prop(light, "angle")
-        elif light.type == 'AREA':
-            col.prop(light, "shape")
+        if bpy.context.engine == 'CYCLES':
+            clamp = light.cycles
+            if light.type in {'POINT', 'SPOT'}:
+                col.prop(light, "use_soft_falloff")
+                col.prop(light, "shadow_soft_size", text="Radius")
+            elif light.type == 'SUN':
+                col.prop(light, "angle")
+            elif light.type == 'AREA':
+                col.prop(light, "shape", text="Shape")
+                sub = col.column(align=True)
 
-            sub = col.column(align=True)
+                if light.shape in {'SQUARE', 'DISK'}:
+                    sub.prop(light, "size")
+                elif light.shape in {'RECTANGLE', 'ELLIPSE'}:
+                    sub.prop(light, "size", text="Size X")
+                    sub.prop(light, "size_y", text="Y")
 
-            if light.shape in {'SQUARE', 'DISK'}:
-                sub.prop(light, "size")
-            elif light.shape in {'RECTANGLE', 'ELLIPSE'}:
-                sub.prop(light, "size", text="Size X")
-                sub.prop(light, "size_y", text="Y")
-
-        if bpy.context.engine == 'BLENDER_EEVEE_NEXT':
-            col.separator()
-            col.prop(light, "use_shadow", text="Cast Shadow")
-            col.prop(light, "shadow_softness_factor", text="Shadow Softness")
-
-            if light.type == 'SUN':
-                col.prop(light, "shadow_trace_distance", text="Trace Distance")
-
-        # Custom Distance
-        if (light and light.type != 'SUN'): # and (bpy.context.engine == 'BLENDER_EEVEE' or 'BLENDER_EEVEE_NEXT')):
-            col.separator()
-            sub = col.column()
-            sub.prop(light, "use_custom_distance", text="Custom Distance")
-
-            sub.active = light.use_custom_distance
-            sub.prop(light, "cutoff_distance", text="Distance")
-        
-        # Spot Shape
-        if (light and light.type == 'SPOT'):
-            col.separator()
-            # Create a new row for the label and center-align it
-            row = col.row(align=True)
-            row.alignment = 'CENTER'
-            row.label(text="Spot Shape")
-            col.prop(light, "spot_size", text="Size")
-            col.prop(light, "spot_blend", text="Blend", slider=True)
-
-            col.prop(light, "show_cone")
-
-        # Shadows
-        if (light and light.type in {'POINT', 'SUN', 'SPOT', 'AREA'}):
-
-            col.separator()
-            subb = col.column()
-            subb.prop(light, "use_shadow", text="Shadow")
-
-            if light.type != 'SUN':
-                subb.prop(light, "shadow_buffer_clip_start", text="Clip Start")
-            subb.prop(light, "shadow_buffer_bias", text="Bias")
-            subb.active = light.use_shadow
-
-            # Cascaded Shadow Map
-            if (light and light.type == 'SUN'):
-
+            if not (light.type == 'AREA' and clamp.is_portal):
                 col.separator()
-                # Create a new row for the label and center-align it
+                sub = col.column()
+                sub.prop(clamp, "max_bounces")
+
+            sub = col.column(align=True)
+            sub.active = not (light.type == 'AREA' and clamp.is_portal)
+
+            sub.prop(light, "use_shadow", text="Cast Shadow")
+            sub.prop(clamp, "use_multiple_importance_sampling", text="Multiple Importance")
+            if use_mnee(bpy.context):
+                sub.prop(clamp, "is_caustics_light", text="Shadow Caustics")
+
+            if light.type == 'AREA':
+                col.prop(clamp, "is_portal", text="Portal")
+
+            if light.type == 'SPOT':
+                col.separator()
                 row = col.row(align=True)
                 row.alignment = 'CENTER'
-                row.label(text="Cascaded Shadow Map")
-                col.prop(light, "shadow_cascade_count", text="Count")
-                col.prop(light, "shadow_cascade_fade", text="Fade")
+                row.label(text="Spot Shape")
+                col.prop(light, "spot_size", text="Spot Size")
+                col.prop(light, "spot_blend", text="Blend", slider=True)
+                col.prop(light, "show_cone")
 
-                col.prop(light, "shadow_cascade_max_distance", text="Max Distance")
-                col.prop(light, "shadow_cascade_exponent", text="Distribution")
-
-            #Contact Shadows
-            if (
-            (light and light.type in {'POINT', 'SUN', 'SPOT', 'AREA'}) and
-            (bpy.context.engine == 'BLENDER_EEVEE' or 'BLENDER_EEVEE_NEXT')):
-
+            elif light.type == 'AREA':
                 col.separator()
-                subbb = col.column()
-                subbb.active = light.use_shadow
-                subbb.prop(light, "use_contact_shadow", text="Contact Shadows")
+                row = col.row(align=True)
+                row.alignment = 'CENTER'
+                row.label(text="Beam Shape")
+                col.prop(light, "spread", text="Spread")
 
-                col = subbb.column()
-                col.active = light.use_shadow and light.use_contact_shadow
+        # EEVEE
+        if ((bpy.context.engine == 'BLENDER_EEVEE') or (bpy.context.engine == 'BLENDER_EEVEE_NEXT')):
+            col.separator()
+            if light.type in {'POINT', 'SPOT'}:
+                col.prop(light, "use_soft_falloff")
+                col.prop(light, "shadow_soft_size", text="Radius")
+            elif light.type == 'SUN':
+                col.prop(light, "angle")
+            elif light.type == 'AREA':
+                col.prop(light, "shape")
 
-                col.prop(light, "contact_shadow_distance", text="Distance")
-                col.prop(light, "contact_shadow_bias", text="Bias")
-                col.prop(light, "contact_shadow_thickness", text="Thickness")
+                sub = col.column(align=True)
 
+                if light.shape in {'SQUARE', 'DISK'}:
+                    sub.prop(light, "size")
+                elif light.shape in {'RECTANGLE', 'ELLIPSE'}:
+                    sub.prop(light, "size", text="Size X")
+                    sub.prop(light, "size_y", text="Y")
 
+            if bpy.context.engine == 'BLENDER_EEVEE_NEXT':
+                col.separator()
+                col.prop(light, "use_shadow", text="Cast Shadow")
+                col.prop(light, "use_shadow_jitter")
+                col.prop(light, "shadow_jitter_overblur", text="Overblur")
+                col.prop(light, "shadow_filter_radius", text="Radius")
+                col.prop(light, "shadow_maximum_resolution", text="Resolution Limit")
+
+            if (light and light.type == 'SPOT'):
+                col.separator()
+                row = col.row(align=True)
+                row.alignment = 'CENTER'
+                row.label(text="Spot Shape")
+                col.prop(light, "spot_size", text="Size")
+                col.prop(light, "spot_blend", text="Blend", slider=True)
+                col.prop(light, "show_cone")
+
+            col.separator()
+            col.prop(light, "diffuse_factor", text="Diffuse")
+            col.prop(light, "specular_factor", text="Specular")
+            col.prop(light, "volume_factor", text="Volume", text_ctxt=i18n_contexts.id_id)
+
+            if (light and light.type != 'SUN'):
+                col.separator()
+                sub = col.column()
+                sub.prop(light, "use_custom_distance", text="Custom Distance")
+                sub.active = light.use_custom_distance
+                sub.prop(light, "cutoff_distance", text="Distance")
 # -------------------------------------------------------------------------
 # Render layer menu
 # -------------------------------------------------------------------------

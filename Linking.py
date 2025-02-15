@@ -23,17 +23,13 @@ def get_selected_collections(context):
 # -------------------------------------------------------------------
 #   Helper Functions to Ensure BB_ Collections
 # -------------------------------------------------------------------
-def ensure_bb_collection(light, collection_type="light"):
+def ensure_bb_collection(light):
     """
-    For light linking, ensures that the collection with a BB_ prefix exists.
-    Expected name: "BB_Light Linking for <light name>"
+    Ensures that the BB_Light Linking collection exists for the given light.
+    The collection will not be linked to the scene hierarchy and will remain hidden in the Outliner.
     """
-    prefix = "BB_"
-    if collection_type == "light":
-        prop_name = "light_linking_receiver_collection"
-        expected_name = f"{prefix}Light Linking for {light.name}"
-    else:
-        raise ValueError("Invalid collection type for ensure_bb_collection.")
+    prop_name = "light_linking_receiver_collection"
+    expected_name = f"BB_Light Linking for {light.name}"
     
     # Check if the collection already exists
     bb_collection = bpy.data.collections.get(expected_name)
@@ -41,73 +37,62 @@ def ensure_bb_collection(light, collection_type="light"):
         light[prop_name] = expected_name
         return bb_collection
 
-    # Use the Blender operator to create the light linking collection
-    bpy.ops.object.select_all(action='DESELECT')
-    light.select_set(True)
-    bpy.context.view_layer.objects.active = light
-    bpy.ops.object.light_linking_receiver_collection_new()
+    # Use the operator to create the light linking collection
+    try:
+        bpy.ops.object.select_all(action='DESELECT')
+        light.select_set(True)
+        bpy.context.view_layer.objects.active = light
+        bpy.ops.object.light_linking_receiver_collection_new()
+        
+        # Retrieve the newly created collection from the light's properties
+        if hasattr(light, "light_linking") and hasattr(light.light_linking, "receiver_collection"):
+            new_collection = light.light_linking.receiver_collection
+            new_collection.name = expected_name
+            light[prop_name] = expected_name
+            return new_collection
+    except Exception as e:
+        print(f"Operator failed: {e}. Falling back to manual collection creation.")
 
-    # The operator creates a new collection and assigns it to the light's light_linking.receiver_collection
-    # We need to retrieve it from the light's properties
-    if hasattr(light, "light_linking") and hasattr(light.light_linking, "receiver_collection"):
-        new_collection = light.light_linking.receiver_collection
-        new_collection.name = expected_name  # Rename the collection to the expected name
-        light[prop_name] = expected_name
-        return new_collection
-    else:
-        raise RuntimeError(f"Failed to create light linking collection for {light.name}")
+    # Fallback: Manually create the collection
+    new_collection = bpy.data.collections.new(expected_name)
+    light[prop_name] = expected_name
+    return new_collection
 
-# -------------------------------------------------------------------
-#   Create BB_ shadow linking collection (for shadows)
-# -------------------------------------------------------------------
+
 def ensure_shadow_collection(light):
     """
-    For shadow linking, ensures that the collection with a BB_ prefix exists.
-    Expected name: "BB_Shadow Linking for <light name>"
+    Ensures that the BB_Shadow Linking collection exists for the given light.
+    The collection will not be linked to the scene hierarchy and will remain hidden in the Outliner.
     """
     prop_name = "shadow_linking_blocker_collection"
     expected_name = f"BB_Shadow Linking for {light.name}"
+    
+    # Check if the collection already exists
     shadow_collection = bpy.data.collections.get(expected_name)
     if shadow_collection:
-        # Ensure the collection is assigned to the light's blocker_collection property
-        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
-            light.light_linking.blocker_collection = shadow_collection
         light[prop_name] = expected_name
         return shadow_collection
 
-    # Ensure the light is selected and active
-    bpy.ops.object.select_all(action='DESELECT')
-    light.select_set(True)
-    bpy.context.view_layer.objects.active = light
-
-    # Call the operator to create the shadow linking collection
+    # Use the operator to create the shadow linking collection
     try:
+        bpy.ops.object.select_all(action='DESELECT')
+        light.select_set(True)
+        bpy.context.view_layer.objects.active = light
         bpy.ops.object.light_blocker_receiver_collection_new()
+        
+        # Retrieve the newly created collection from the light's properties
+        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+            new_collection = light.light_linking.blocker_collection
+            new_collection.name = expected_name
+            light[prop_name] = expected_name
+            return new_collection
     except Exception as e:
-        # Fallback: Manually create the collection if the operator fails
         print(f"Operator failed: {e}. Falling back to manual collection creation.")
-        new_collection = bpy.data.collections.new(expected_name)
-        bpy.context.scene.collection.children.link(new_collection)
-        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
-            light.light_linking.blocker_collection = new_collection
-        light[prop_name] = expected_name
-        return new_collection
 
-    # Retrieve the newly created collection from the light's properties
-    if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
-        new_collection = light.light_linking.blocker_collection
-        new_collection.name = expected_name  # Rename the collection to the expected name
-        light[prop_name] = expected_name
-        return new_collection
-    else:
-        # Fallback: Manually create the collection if the property is not found
-        print("Failed to retrieve blocker_collection. Falling back to manual collection creation.")
-        new_collection = bpy.data.collections.new(expected_name)
-        bpy.context.scene.collection.children.link(new_collection)
-        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
-            light.light_linking.blocker_collection = new_collection
-        light[prop_name] = expected_name
-        return new_collection
+    # Fallback: Manually create the collection
+    new_collection = bpy.data.collections.new(expected_name)
+    light[prop_name] = expected_name
+    return new_collection
 # -------------------------------------------------------------------
 #   Property Groups for List Items (with multi-selection support)
 # -------------------------------------------------------------------
@@ -380,7 +365,7 @@ class LL_OT_Link(bpy.types.Operator):
         "For each selected light, use the UI-selected BB_ light linking collection (or create it) and add "
         "the selected meshes (from the Mesh and Collection lists) to it."
     )
-    
+
     def execute(self, context):
         scene = context.scene
         selected_lights = [item.obj for item in scene.ll_light_items if item.selected and item.obj]
@@ -391,30 +376,31 @@ class LL_OT_Link(bpy.types.Operator):
                 for obj in item.coll.all_objects:
                     if obj.type == 'MESH':
                         collection_meshes.append(obj)
-        
+
         if not selected_lights:
             self.report({'WARNING'}, "No lights selected")
             return {'CANCELLED'}
-        
+
         # Combine meshes uniquely (by object name)
         all_meshes = {obj.name: obj for obj in (selected_meshes + collection_meshes)}.values()
+
         if not list(all_meshes):
             self.report({'WARNING'}, "No mesh objects selected")
             return {'CANCELLED'}
-        
+
         total_linked_meshes = 0
+
         for light in selected_lights:
             if not light.visible_get():
                 self.report({'ERROR'}, f"Light must be visible for linking: {light.name}")
                 continue
-            
+
             bpy.ops.object.select_all(action='DESELECT')
             light.select_set(True)
             context.view_layer.objects.active = light
 
             # Ensure the BB_ collection exists
-            new_group = ensure_bb_collection(light, collection_type="light")
-            
+            new_group = ensure_bb_collection(light)  # Removed `collection_type="light"`
             if not new_group:
                 self.report({'WARNING'}, f"Failed to create or retrieve linking group for {light.name}")
                 continue
@@ -426,7 +412,7 @@ class LL_OT_Link(bpy.types.Operator):
                     linked_meshes += 1
 
             total_linked_meshes += linked_meshes
-        
+
         self.report({'INFO'}, f"Linked {len(selected_lights)} light(s) to {total_linked_meshes} mesh(es)")
         return {'FINISHED'}
 
