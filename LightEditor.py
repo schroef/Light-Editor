@@ -524,7 +524,6 @@ class_registration_status = {}
 
 def register():
     global custom_icons, class_registration_status
-    print("Starting registration process")
 
     # Load icons
     if custom_icons is None:
@@ -567,6 +566,14 @@ def register():
         ),
         update=update_light_types
     )
+
+    # NEW PROPERTY ADDED HERE
+    bpy.types.Scene.selected_render_layer = bpy.props.StringProperty(
+        name="Selected Render Layer",
+        description="Choose the active render layer",
+        default=""
+    )
+
     bpy.types.Object.light_selected = BoolProperty(
         name="Selected",
         get=get_light_selected,
@@ -606,10 +613,8 @@ def register():
                 class_registration_status[cls.__name__] = True
             except Exception as e:
                 print(f"Failed to register {cls.__name__}: {e}")
-
 def unregister():
     global custom_icons, class_registration_status
-    print("Starting unregistration process")
 
     # Remove handlers
     if LE_clear_handler in bpy.app.handlers.load_post:
@@ -642,7 +647,3 @@ def unregister():
         bpy.utils.previews.remove(custom_icons)
         custom_icons = None
 
-if __name__ == "__main__":
-    if not bpy.app.background:
-        if not hasattr(bpy.types, "LIGHT_PT_editor"):
-            register()
