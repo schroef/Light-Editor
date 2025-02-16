@@ -1,5 +1,6 @@
 import bpy
 from bpy.types import Operator, Panel
+from bpy.props import StringProperty
 
 # Global dictionaries for group states, moved to Scene for persistence
 bpy.types.Scene.group_collapse_dict = {}
@@ -22,6 +23,22 @@ def update_render_layer(self, context):
         if vl.name == selected:
             context.window.view_layer = vl
             break
+
+# -------------------------------------------------------------------------
+# Filter Functions
+# -------------------------------------------------------------------------
+class LG_ClearFilter(Operator):
+    """Clear the light group filter."""
+    bl_idname = "lg_editor.clear_filter"
+    bl_label = "Clear Filter"
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.light_group_filter
+
+    def execute(self, context):
+        context.scene.light_group_filter = ""
+        return {'FINISHED'}
 
 # -------------------------------------------------------------------------
 # Operators
@@ -211,6 +228,11 @@ class LG_PT_LightGroupPanel(Panel):
         row.operator("lg_editor.unassign_light_group", text="Unassign")
         row.operator("lg_editor.reset_light_selection", text="Reset")
 
+        # Add the filter row
+        row = layout.row(align=True)
+        row.prop(context.scene, "light_group_filter", text="", icon="VIEWZOOM")
+        row.operator("lg_editor.clear_filter", text="", icon='PANEL_CLOSE')
+
         # Add the render layer dropdown
         row = layout.row()
         row.prop(context.scene, "selected_render_layer", text="Render Layer")
@@ -235,7 +257,18 @@ class LG_PT_LightGroupPanel(Panel):
         if not_assigned:
             groups["Not Assigned"] = not_assigned
 
+        # Filter groups based on the filter text
+        filter_pattern = context.scene.light_group_filter.lower()
+        filtered_groups = {}
         for grp_name, group_objs in groups.items():
+            if filter_pattern:
+                filtered_objs = [obj for obj in group_objs if filter_pattern in obj.name.lower()]
+                if filtered_objs:
+                    filtered_groups[grp_name] = filtered_objs
+            else:
+                filtered_groups[grp_name] = group_objs
+
+        for grp_name, group_objs in filtered_groups.items():
             group_key = f"group_{grp_name}"
             collapsed = context.scene.group_collapse_dict.get(group_key, False)
             is_exclusive = context.scene.group_exclusive_dict.get(group_key, False)
@@ -270,6 +303,7 @@ classes = (
     LG_ToggleGroup,
     LG_AddLightGroup,
     LG_RemoveLightGroup,
+    LG_ClearFilter,
     LG_PT_LightGroupPanel,
 )
 
@@ -279,6 +313,12 @@ def register():
         description="Select the render layer",
         items=get_render_layer_items,
         update=update_render_layer
+    )
+
+    bpy.types.Scene.light_group_filter = StringProperty(
+        name="Filter",
+        default="",
+        description="Filter light groups by name (wildcards allowed)"
     )
 
     bpy.types.Object.is_selected = bpy.props.BoolProperty(
@@ -293,6 +333,7 @@ def register():
 
 def unregister():
     del bpy.types.Scene.selected_render_layer
+    del bpy.types.Scene.light_group_filter
     del bpy.types.Object.is_selected
     del bpy.types.Scene.group_collapse_dict
     del bpy.types.Scene.group_exclusive_dict
