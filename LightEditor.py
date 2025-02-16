@@ -597,32 +597,52 @@ def register():
 
 def unregister():
     global custom_icons
-    bpy.utils.previews.remove(custom_icons)
 
-    #removove handler post load > see @persistent
-    bpy.app.handlers.load_post.remove(LE_clear_handler)
-    bpy.app.handlers.load_post.remove(LE_check_lights_enabled)
+    # Remove custom icons
+    if custom_icons:
+        bpy.utils.previews.remove(custom_icons)
+        custom_icons = None
+
+    # Remove handlers
+    if LE_clear_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(LE_clear_handler)
+    if LE_check_lights_enabled in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(LE_check_lights_enabled)
 
     # Unregister scene properties
-    del bpy.types.Scene.current_active_light
-    del bpy.types.Scene.selected_render_layer
+    if hasattr(bpy.types.Scene, 'current_active_light'):
+        del bpy.types.Scene.current_active_light
+    if hasattr(bpy.types.Scene, 'selected_render_layer'):
+        del bpy.types.Scene.selected_render_layer
 
-    # Unregister other classes and properties
+    # Unregister other properties
+    if hasattr(bpy.types.Scene, 'light_editor_filter'):
+        del bpy.types.Scene.light_editor_filter
+    if hasattr(bpy.types.Scene, 'light_editor_kind_alpha'):
+        del bpy.types.Scene.light_editor_kind_alpha
+    if hasattr(bpy.types.Scene, 'light_editor_group_by_collection'):
+        del bpy.types.Scene.light_editor_group_by_collection
+    if hasattr(bpy.types.Light, 'soft_falloff'):
+        del bpy.types.Light.soft_falloff
+    if hasattr(bpy.types.Light, 'max_bounce'):
+        del bpy.types.Light.max_bounce
+    if hasattr(bpy.types.Light, 'multiple_instance'):
+        del bpy.types.Light.multiple_instance
+    if hasattr(bpy.types.Light, 'shadow_caustic'):
+        del bpy.types.Light.shadow_caustic
+    if hasattr(bpy.types.Light, 'spread'):
+        del bpy.types.Light.spread
+    if hasattr(bpy.types.Object, 'light_enabled'):
+        del bpy.types.Object.light_enabled
+    if hasattr(bpy.types.Object, 'light_turn_off_others'):
+        del bpy.types.Object.light_turn_off_others
+    if hasattr(bpy.types.Object, 'light_expanded'):
+        del bpy.types.Object.light_expanded
+
+    # Unregister classes
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
-
-    # Unregister other properties (as shown in your original code)
-    del bpy.types.Scene.light_editor_filter
-    del bpy.types.Scene.light_editor_kind_alpha
-    del bpy.types.Scene.light_editor_group_by_collection
-    del bpy.types.Light.soft_falloff
-    del bpy.types.Light.max_bounce
-    del bpy.types.Light.multiple_instance
-    del bpy.types.Light.shadow_caustic
-    del bpy.types.Light.spread
-    del bpy.types.Object.light_enabled
-    del bpy.types.Object.light_turn_off_others
-    del bpy.types.Object.light_expanded
+        if hasattr(bpy.types, cls.__name__):
+            bpy.utils.unregister_class(cls)
 
 if __name__ == "__main__":
     register()
