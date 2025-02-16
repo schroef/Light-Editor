@@ -233,51 +233,63 @@ class LIGHT_OT_ToggleGroup(bpy.types.Operator):
         return {'FINISHED'}
 
 class LIGHT_OT_ToggleGroupAllOff(bpy.types.Operator):
-    """Toggle all lights in the group off or restore them, excluding the lights in the collection."""
+    """Default tooltip for Toggle Group All Off"""
     bl_idname = "light_editor.toggle_group_all_off"
     bl_label = "Toggle Group All Off"
     group_key: StringProperty()
+
+    @classmethod
+    def description(cls, context, properties):
+        # Dynamically set the tooltip based on the grouping mode
+        scene = context.scene
+        if scene.filter_light_types == 'COLLECTION':
+            return "Turn ON/OFF Collection"
+        return "Toggle all lights in the group off or restore them"
 
     def execute(self, context):
         global group_checkbox_1_state, group_lights_original_state
         is_on = group_checkbox_1_state.get(self.group_key, True)
         group_objs = self._get_group_objects(context, self.group_key)
-        
-        if is_on:
-            original_states = {}
-            for obj in group_objs:
-                # Exclude lights in the collection
-                if not self._is_in_collection(obj, self.group_key):
-                    original_states[obj.name] = obj.light_enabled
-                    obj.light_enabled = False
-            group_lights_original_state[self.group_key] = original_states
-            group_checkbox_1_state[self.group_key] = False
 
-            # Turn off the collection in the Outliner
-            if self.group_key.startswith("coll_"):
+        if is_on:
+            # Turn off lights or hide collections based on mode
+            if self.group_key.startswith("coll_"):  # Collection Mode
                 coll_name = self.group_key[5:]
                 collection = bpy.data.collections.get(coll_name)
                 if collection:
                     collection.hide_viewport = True
                     collection.hide_render = True
+                    # Store the state so we can restore it later
+                    collection_state = {'viewport': collection.hide_viewport, 'render': collection.hide_render}
+                    group_lights_original_state[self.group_key] = collection_state
+            elif self.group_key.startswith("kind_"):  # Kind Mode
+                original_states = {}
+                for obj in group_objs:
+                    if obj.type == 'LIGHT':
+                        original_states[obj.name] = obj.light_enabled
+                        obj.light_enabled = False
+                group_lights_original_state[self.group_key] = original_states
+            group_checkbox_1_state[self.group_key] = False
         else:
-            original_states = group_lights_original_state.get(self.group_key, {})
-            for obj in group_objs:
-                # Exclude lights in the collection
-                if not self._is_in_collection(obj, self.group_key):
-                    obj.light_enabled = original_states.get(obj.name, True)
-            if self.group_key in group_lights_original_state:
-                del group_lights_original_state[self.group_key]
-            group_checkbox_1_state[self.group_key] = True
-
-            # Turn on the collection in the Outliner
-            if self.group_key.startswith("coll_"):
+            # Restore lights or collections visibility based on mode
+            if self.group_key.startswith("coll_"):  # Collection Mode
                 coll_name = self.group_key[5:]
                 collection = bpy.data.collections.get(coll_name)
                 if collection:
+                    # Restore the collection visibility state
                     collection.hide_viewport = False
                     collection.hide_render = False
-        
+                    if self.group_key in group_lights_original_state:
+                        del group_lights_original_state[self.group_key]
+            elif self.group_key.startswith("kind_"):  # Kind Mode
+                original_states = group_lights_original_state.get(self.group_key, {})
+                for obj in group_objs:
+                    if obj.type == 'LIGHT':
+                        obj.light_enabled = original_states.get(obj.name, True)
+                if self.group_key in group_lights_original_state:
+                    del group_lights_original_state[self.group_key]
+            group_checkbox_1_state[self.group_key] = True
+
         for area in context.screen.areas:
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
@@ -286,31 +298,27 @@ class LIGHT_OT_ToggleGroupAllOff(bpy.types.Operator):
     def _get_group_objects(self, context, group_key):
         scene = context.scene
         filter_pattern = scene.light_editor_filter.lower()
+        
+        # Get all lights in the current view layer
         if filter_pattern:
             all_lights = [obj for obj in context.view_layer.objects
                           if obj.type == 'LIGHT' and re.search(filter_pattern, obj.name, re.I)]
         else:
             all_lights = [obj for obj in context.view_layer.objects if obj.type == 'LIGHT']
         
+        # Handle "Collection" mode
         if scene.filter_light_types == 'COLLECTION' and group_key.startswith("coll_"):
             coll_name = group_key[5:]
             return [obj for obj in all_lights
                     if (obj.users_collection and obj.users_collection[0].name == coll_name)
                     or (not obj.users_collection and coll_name == "No Collection")]
+        
+        # Handle "Kind" mode
         if scene.filter_light_types == 'KIND' and group_key.startswith("kind_"):
             kind = group_key[5:]
             return [obj for obj in all_lights if obj.data.type == kind]
+        
         return []
-
-    def _is_in_collection(self, obj, group_key):
-        """Check if the object is in the collection specified by the group_key."""
-        if group_key.startswith("coll_"):
-            coll_name = group_key[5:]
-            if obj.users_collection:
-                return obj.users_collection[0].name == coll_name
-            else:
-                return coll_name == "No Collection"
-        return False
 
 class LIGHT_OT_ClearFilter(bpy.types.Operator):
     """Clear Filter Types"""
@@ -318,12 +326,66 @@ class LIGHT_OT_ClearFilter(bpy.types.Operator):
     bl_label = "Clear Filter"
 
     @classmethod
-    def poll(cls, context):
-        return context.scene.light_editor_filter
+    def description(cls, context, properties):
+        scene = context.scene
+        if scene.filter_light_types == 'COLLECTION':
+            return "Turn ON/OFF Collection"
+        elif scene.filter_light_types == 'KIND':
+            return "Turn ON/OFF All Lights of This Kind"
+        return "Toggle all lights in the group off or restore them"
 
     def execute(self, context):
-        if context.scene.light_editor_filter:
-            context.scene.light_editor_filter = ""
+        global group_checkbox_1_state, group_lights_original_state
+        is_on = group_checkbox_1_state.get(self.group_key, True)
+        group_objs = self._get_group_objects(context, self.group_key)
+        
+        if is_on:
+            # Turn off all lights/collections in the group
+            if self.group_key.startswith("coll_"):  # Collection Mode
+                coll_name = self.group_key[5:]
+                collection = bpy.data.collections.get(coll_name)
+                if collection:
+                    collection.hide_viewport = True
+                    collection.hide_render = True
+                    # Store the state so we can restore it later
+                    collection_state = {'viewport': collection.hide_viewport, 'render': collection.hide_render}
+                    group_lights_original_state[self.group_key] = collection_state
+            elif self.group_key.startswith("kind_"):  # Kind Mode
+                for obj in group_objs:
+                    if obj.type == 'LIGHT':
+                        obj.hide_viewport = True
+                        obj.hide_render = True
+                        # Store the original state
+                        group_lights_original_state.setdefault(self.group_key, {})[obj.name] = {
+                            'viewport': obj.hide_viewport,
+                            'render': obj.hide_render
+                        }
+            group_checkbox_1_state[self.group_key] = False
+        else:
+            # Restore the original state of all lights/collections in the group
+            if self.group_key.startswith("coll_"):  # Collection Mode
+                coll_name = self.group_key[5:]
+                collection = bpy.data.collections.get(coll_name)
+                if collection:
+                    collection.hide_viewport = False
+                    collection.hide_render = False
+                    if self.group_key in group_lights_original_state:
+                        del group_lights_original_state[self.group_key]
+            elif self.group_key.startswith("kind_"):  # Kind Mode
+                for obj in group_objs:
+                    if obj.type == 'LIGHT':
+                        obj.hide_viewport = False
+                        obj.hide_render = False
+                        # Remove the stored state
+                        if self.group_key in group_lights_original_state and obj.name in group_lights_original_state[self.group_key]:
+                            del group_lights_original_state[self.group_key][obj.name]
+            group_checkbox_1_state[self.group_key] = True
+        
+        # Redraw the UI
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+        
         return {'FINISHED'}
 
 class LIGHT_OT_SelectLight(bpy.types.Operator):
