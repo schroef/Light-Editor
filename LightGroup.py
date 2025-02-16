@@ -6,6 +6,24 @@ bpy.types.Scene.group_collapse_dict = {}
 bpy.types.Scene.group_exclusive_dict = {}
 
 # -------------------------------------------------------------------------
+# Render Layer Functions
+# -------------------------------------------------------------------------
+def get_render_layer_items(self, context):
+    """Return a list of render layer items for the EnumProperty."""
+    items = []
+    for view_layer in context.scene.view_layers:
+        items.append((view_layer.name, view_layer.name, ""))
+    return items
+
+def update_render_layer(self, context):
+    selected = self.selected_render_layer
+    # Iterate over the scene’s view layers:
+    for vl in context.scene.view_layers:
+        if vl.name == selected:
+            context.window.view_layer = vl
+            break
+
+# -------------------------------------------------------------------------
 # Operators
 # -------------------------------------------------------------------------
 class LG_AssignLightGroup(Operator):
@@ -28,7 +46,6 @@ class LG_AssignLightGroup(Operator):
             self.report({'WARNING'}, "No light group selected or available.")
         return {'FINISHED'}
 
-
 class LG_UnassignLightGroup(Operator):
     """Unassign the selected lights from their current light group."""
     bl_idname = "lg_editor.unassign_light_group"
@@ -41,7 +58,6 @@ class LG_UnassignLightGroup(Operator):
 
         bpy.ops.lg_editor.reset_light_selection()
         return {'FINISHED'}
-
 
 class LG_ResetLightSelection(Operator):
     """Reset the selection of lights."""
@@ -57,7 +73,6 @@ class LG_ResetLightSelection(Operator):
         self.report({'INFO'}, "Deselected all lights")
         return {'FINISHED'}
 
-
 class LG_ToggleLightSelection(Operator):
     """Toggle selection for an individual light."""
     bl_idname = "lg_editor.toggle_light_selection"
@@ -72,7 +87,6 @@ class LG_ToggleLightSelection(Operator):
         else:
             self.report({'WARNING'}, f"Light '{self.light_name}' not found.")
         return {'FINISHED'}
-
 
 class LG_ToggleGroupExclusive(Operator):
     """Toggle exclusive activation of this group."""
@@ -96,7 +110,6 @@ class LG_ToggleGroupExclusive(Operator):
                     obj.hide_viewport = False
         return {'FINISHED'}
 
-
 class LG_ToggleGroup(Operator):
     """Toggle the collapse state of a group."""
     bl_idname = "lg_editor.toggle_group"
@@ -106,7 +119,6 @@ class LG_ToggleGroup(Operator):
     def execute(self, context):
         context.scene.group_collapse_dict[self.group_key] = not context.scene.group_collapse_dict.get(self.group_key, False)
         return {'FINISHED'}
-
 
 class LG_AddLightGroup(Operator):
     """Add a new light group in the current view_layer."""
@@ -124,7 +136,6 @@ class LG_AddLightGroup(Operator):
         view_layer.active_lightgroup_index = len(view_layer.lightgroups) - 1
         return {'FINISHED'}
 
-
 class LG_RemoveLightGroup(Operator):
     """Remove the selected light group."""
     bl_idname = "lg_editor.remove_light_group"
@@ -132,36 +143,43 @@ class LG_RemoveLightGroup(Operator):
 
     def execute(self, context):
         view_layer = context.view_layer
-        if (hasattr(view_layer, "lightgroups")
-                and view_layer.active_lightgroup_index >= 0
-                and view_layer.active_lightgroup_index < len(view_layer.lightgroups)):
-            active_group_name = view_layer.lightgroups[view_layer.active_lightgroup_index].name
+        if hasattr(view_layer, "lightgroups"):
+            if view_layer.active_lightgroup_index >= 0 and view_layer.active_lightgroup_index < len(view_layer.lightgroups):
+                active_group_name = view_layer.lightgroups[view_layer.active_lightgroup_index].name
 
-            for obj in context.scene.objects:
-                if obj.type == 'LIGHT' and getattr(obj, "lightgroup", "") == active_group_name:
-                    obj.lightgroup = ""
+                # Unassign lights from the group before removing the group
+                for obj in context.scene.objects:
+                    if obj.type == 'LIGHT' and getattr(obj, "lightgroup", "") == active_group_name:
+                        obj.lightgroup = ""
 
-            view_layer.lightgroups.remove(view_layer.active_lightgroup_index)
+                # Use the Blender operator to remove the lightgroup
+                bpy.ops.scene.view_layer_remove_lightgroup()
 
-            group_key = f"group_{active_group_name}"
-            context.scene.group_collapse_dict.pop(group_key, None)
-            context.scene.group_exclusive_dict.pop(group_key, None)
+                # Adjust group index if necessary
+                if view_layer.active_lightgroup_index >= len(view_layer.lightgroups):
+                    view_layer.active_lightgroup_index = max(0, len(view_layer.lightgroups) - 1)
 
-            if view_layer.active_lightgroup_index >= len(view_layer.lightgroups):
-                view_layer.active_lightgroup_index = len(view_layer.lightgroups) - 1
+                group_key = f"group_{active_group_name}"
+                context.scene.group_collapse_dict.pop(group_key, None)
+                context.scene.group_exclusive_dict.pop(group_key, None)
 
-            for area in context.screen.areas:
-                if area.type == 'VIEW_3D':
-                    area.tag_redraw()
+                for area in context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+            else:
+                self.report({'WARNING'}, "No active light group to remove.")
+        else:
+            self.report({'WARNING'}, "Lightgroups not available in this Blender version.")
         return {'FINISHED'}
-
 
 def draw_main_row(box, obj):
     row = box.row(align=True)
     row.prop(obj, "is_selected", text="", emboss=True, icon='NONE')
     row.prop(obj, "name", text="")
 
-
+# -------------------------------------------------------------------------
+# Main Panel
+# -------------------------------------------------------------------------
 class LG_PT_LightGroupPanel(Panel):
     bl_label = "Light Groups"
     bl_idname = "LG_PT_light_group_panel"
@@ -193,14 +211,18 @@ class LG_PT_LightGroupPanel(Panel):
         row.operator("lg_editor.unassign_light_group", text="Unassign")
         row.operator("lg_editor.reset_light_selection", text="Reset")
 
+        # Add the render layer dropdown
+        row = layout.row()
+        row.prop(context.scene, "selected_render_layer", text="Render Layer")
+
         groups = {}
         if hasattr(view_layer, "lightgroups"):
             for lg in view_layer.lightgroups:
                 lights_in_group = [
                     obj for obj in context.scene.objects
                     if obj.type == 'LIGHT'
-                       and not obj.hide_render
-                       and getattr(obj, "lightgroup", "") == lg.name
+                        and not obj.hide_render
+                        and getattr(obj, "lightgroup", "") == lg.name
                 ]
                 groups[lg.name] = lights_in_group
 
@@ -236,7 +258,9 @@ class LG_PT_LightGroupPanel(Panel):
                 for obj in group_objs:
                     draw_main_row(header_box, obj)
 
-
+# -------------------------------------------------------------------------
+# Classes and Registration
+# -------------------------------------------------------------------------
 classes = (
     LG_AssignLightGroup,
     LG_UnassignLightGroup,
@@ -249,8 +273,13 @@ classes = (
     LG_PT_LightGroupPanel,
 )
 
-
 def register():
+    bpy.types.Scene.selected_render_layer = bpy.props.EnumProperty(
+        name="Render Layer",
+        description="Select the render layer",
+        items=get_render_layer_items,
+        update=update_render_layer
+    )
 
     bpy.types.Object.is_selected = bpy.props.BoolProperty(
         name="Is Selected",
@@ -262,15 +291,14 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-
 def unregister():
+    del bpy.types.Scene.selected_render_layer
     del bpy.types.Object.is_selected
     del bpy.types.Scene.group_collapse_dict
     del bpy.types.Scene.group_exclusive_dict
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
-
 
 if __name__ == "__main__":
     register()
