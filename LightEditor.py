@@ -319,7 +319,8 @@ class LIGHT_OT_ToggleGroupAllOff(bpy.types.Operator):
             return [obj for obj in all_lights if obj.data.type == kind]
         
         return []
-
+    
+    
 class LIGHT_OT_ClearFilter(bpy.types.Operator):
     """Clear Filter Types"""
     bl_idname = "le.clear_light_filter"
