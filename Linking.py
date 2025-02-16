@@ -61,7 +61,8 @@ def ensure_bb_collection(light):
 
 def ensure_shadow_collection(light):
     """
-    Ensures that the BB_Shadow Linking collection exists for the given light.
+    For shadow linking, ensures that the collection with a BB_ prefix exists.
+    Expected name: "BB_Shadow Linking for <light_name>"
     The collection will not be linked to the scene hierarchy and will remain hidden in the Outliner.
     """
     prop_name = "shadow_linking_blocker_collection"
@@ -70,28 +71,21 @@ def ensure_shadow_collection(light):
     # Check if the collection already exists
     shadow_collection = bpy.data.collections.get(expected_name)
     if shadow_collection:
-        light[prop_name] = expected_name
+        # Ensure the collection is assigned to the light's blocker_collection property
+        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+            light.light_linking.blocker_collection = shadow_collection
+            light[prop_name] = expected_name
         return shadow_collection
 
-    # Use the operator to create the shadow linking collection
-    try:
-        bpy.ops.object.select_all(action='DESELECT')
-        light.select_set(True)
-        bpy.context.view_layer.objects.active = light
-        bpy.ops.object.light_blocker_receiver_collection_new()
-        
-        # Retrieve the newly created collection from the light's properties
-        if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
-            new_collection = light.light_linking.blocker_collection
-            new_collection.name = expected_name
-            light[prop_name] = expected_name
-            return new_collection
-    except Exception as e:
-        print(f"Operator failed: {e}. Falling back to manual collection creation.")
-
-    # Fallback: Manually create the collection
+    # Manually create the collection as a standalone data block
     new_collection = bpy.data.collections.new(expected_name)
-    light[prop_name] = expected_name
+
+    # Assign the new collection to the light's blocker_collection property
+    if hasattr(light, "light_linking") and hasattr(light.light_linking, "blocker_collection"):
+        light.light_linking.blocker_collection = new_collection
+        light[prop_name] = expected_name
+
+    # Return the newly created collection
     return new_collection
 # -------------------------------------------------------------------
 #   Property Groups for List Items (with multi-selection support)
@@ -124,7 +118,7 @@ def update_light_items(scene, context):
             item.obj = obj
             item.selected = prev_sel.get(obj.name, False)
     scene.ll_light_index = 0 if scene.ll_light_items else -1
-    print("Updated Light Items:", [item.name for item in scene.ll_light_items])
+    #print("Updated Light Items:", [item.name for item in scene.ll_light_items])
 
 def update_mesh_items(scene, context):
     prev_sel = {item.name: item.selected for item in scene.ll_mesh_items}
@@ -136,7 +130,7 @@ def update_mesh_items(scene, context):
             item.obj = obj
             item.selected = prev_sel.get(obj.name, False)
     scene.ll_mesh_index = 0 if scene.ll_mesh_items else -1
-    print("Updated Mesh Items:", [item.name for item in scene.ll_mesh_items])
+    #print("Updated Mesh Items:", [item.name for item in scene.ll_mesh_items])
 
 def update_collection_items(scene, context):
     prev_sel = {item.name: item.selected for item in scene.ll_collection_items}
@@ -150,7 +144,7 @@ def update_collection_items(scene, context):
         item.coll = coll
         item.selected = prev_sel.get(coll.name, False)
     scene.ll_collection_index = 0 if scene.ll_collection_items else -1
-    print("Updated Collection Items:", [item.name for item in scene.ll_collection_items])
+    #print("Updated Collection Items:", [item.name for item in scene.ll_collection_items])
 
 def force_redraw(context):
     for area in context.screen.areas:
@@ -289,12 +283,26 @@ class LL_OT_RefreshSelectedCollections(bpy.types.Operator):
 class LL_OT_RefreshAllLights(bpy.types.Operator):
     bl_idname = "light_link.refresh_all_lights"
     bl_label = "Refresh All Lights"
-    bl_description = "Display all lights in the scene"
-    
+    bl_description = "Display all lights in the scene that are turned on and renderable"
+
     def execute(self, context):
-        update_light_items(context.scene, context)
+        scene = context.scene
+        prev_sel = {item.name: item.selected for item in scene.ll_light_items}
+        scene.ll_light_items.clear()
+
+        # Filter lights that are turned on and renderable
+        for obj in scene.objects:
+            if obj.type == 'LIGHT':
+                # Check if the light is not hidden in render or viewport
+                if not obj.hide_render and not obj.hide_viewport:
+                    item = scene.ll_light_items.add()
+                    item.name = obj.name
+                    item.obj = obj
+                    item.selected = prev_sel.get(obj.name, False)
+
+        scene.ll_light_index = 0 if scene.ll_light_items else -1
         force_redraw(context)
-        self.report({'INFO'}, f"Listed all {len(context.scene.ll_light_items)} lights")
+        self.report({'INFO'}, f"Listed {len(scene.ll_light_items)} visible and renderable lights")
         return {'FINISHED'}
 
 class LL_OT_ResetLights(bpy.types.Operator):
@@ -400,7 +408,7 @@ class LL_OT_Link(bpy.types.Operator):
             context.view_layer.objects.active = light
 
             # Ensure the BB_ collection exists
-            new_group = ensure_bb_collection(light)  # Removed `collection_type="light"`
+            new_group = ensure_bb_collection(light)  # Removed collection_type="light"
             if not new_group:
                 self.report({'WARNING'}, f"Failed to create or retrieve linking group for {light.name}")
                 continue
@@ -639,7 +647,7 @@ class LL_PT_Panel(bpy.types.Panel):
         op_row = layout.row(align=True)
         col_light_ops = op_row.column(align=True)
         col_light_ops.operator("light_link.refresh_selected_lights", text="Selected Lights")
-        col_light_ops.operator("light_link.refresh_all_lights", text="All Lights")
+        col_light_ops.operator("light_link.refresh_all_lights", text="All Visible Lights")
         col_light_ops.operator("light_link.reset_lights", text="Reset")
         
         col_mesh_ops = op_row.column(align=True)
