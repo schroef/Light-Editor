@@ -210,6 +210,13 @@ class LG_PT_LightGroupPanel(Panel):
 
     def draw(self, context):
         layout = self.layout
+
+        # Check if the render engine is Eevee
+        if context.scene.render.engine == 'BLENDER_EEVEE':
+            layout.label(text="Light Groups are not supported in EEVEE", icon='ERROR')
+            return
+
+        # Existing UI code for other engines (e.g., Cycles)
         view_layer = context.view_layer
 
         row = layout.row(align=True)
@@ -226,7 +233,7 @@ class LG_PT_LightGroupPanel(Panel):
         row = layout.row(align=True)
         row.operator("lg_editor.assign_light_group", text="Assign")
         row.operator("lg_editor.unassign_light_group", text="Unassign")
-        row.operator("lg_editor.reset_light_selection", text="Reset")
+        row.operator("lg_editor.reset_light_selection", text="Deselect All")
 
         # Add the filter row
         row = layout.row(align=True)
@@ -290,6 +297,7 @@ class LG_PT_LightGroupPanel(Panel):
             if not collapsed:
                 for obj in group_objs:
                     draw_main_row(header_box, obj)
+
 
 # -------------------------------------------------------------------------
 # Classes and Registration
