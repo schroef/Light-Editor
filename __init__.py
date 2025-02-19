@@ -15,17 +15,21 @@ import bpy
 from . import LightEditor
 from . import Linking
 from . import LightGroup
+from . icons import initialize_icons_collection, unload_icons
 
 def register():
     LightEditor.register()
     Linking.register()
     LightGroup.register()
+    initialize_icons_collection()
 
 def unregister():
     # Unregister in reverse order (best practice)
     LightGroup.unregister()
     Linking.unregister()
     LightEditor.unregister()
+    unload_icons()
+
 
 if __name__ == "__main__":
     register()

@@ -1,10 +1,11 @@
-import bpy
-from bpy.types import Operator, Panel
+import bpy, os
+from bpy.types import Operator, Panel, Menu
 from bpy.props import StringProperty
-
+from . icons import get_icon_id
 # Global dictionaries for group states, moved to Scene for persistence
 bpy.types.Scene.group_collapse_dict = {}
 bpy.types.Scene.group_exclusive_dict = {}
+
 
 # -------------------------------------------------------------------------
 # Render Layer Functions
@@ -39,6 +40,29 @@ class LG_ClearFilter(Operator):
     def execute(self, context):
         context.scene.light_group_filter = ""
         return {'FINISHED'}
+
+
+class LIGHT_MT_lightgroup_context_menu(Menu):
+    bl_label = "LighGroup Specials"
+
+    def draw(self, _context):
+        layout = self.layout
+
+        layout.operator("scene.view_layer_add_used_lightgroups", icon='ADD')
+        layout.operator("scene.view_layer_remove_unused_lightgroups", icon='REMOVE')
+
+        layout.separator()
+        layout.operator(
+            "lg.reset_all_lightgroups",
+            icon='LOOP_BACK',
+            text="Reset All LighGroups",
+        )
+        layout.operator(
+            "lg.remove_all_lightgroups",
+            icon='NONE',
+            text="Delete All LighGroups",
+        )
+
 
 # -------------------------------------------------------------------------
 # Operators
@@ -189,9 +213,61 @@ class LG_RemoveLightGroup(Operator):
             self.report({'WARNING'}, "Lightgroups not available in this Blender version.")
         return {'FINISHED'}
 
+class LG_ResetAllLighgrGroups(Operator):
+    """Remove all lights from any LightGroups."""
+    bl_idname = "lg.reset_all_lightgroups"
+    bl_label = "Reset All LightGroups"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        view_layer = context.view_layer
+        # Unassign lights from the group before removing the group
+        for obj in context.scene.objects:
+            if obj.type == 'LIGHT' and (obj.lightgroup != ""): #getattr(obj, "lightgroup", "") == active_group_name:
+                obj.lightgroup = ""
+
+                # Force redraw panel so lightgroup gets updated
+                for area in context.screen.areas:
+                    if area.type == 'PROPERTIES':
+                        area.tag_redraw()
+
+        else:
+            self.report({'INFO'}, "All Lightgroups cleared.")
+        return {'FINISHED'}
+
+class LG_RemoveAllLighgrGroups(Operator):
+    """Remove all LightGroups."""
+    bl_idname = "lg.remove_all_lightgroups"
+    bl_label = "Remove All the LightGroups in the scene. Also removes them from the lights."
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        view_layer = context.view_layer
+        # Unassign lights from the group before removing the group
+        if hasattr(view_layer, "lightgroups"):
+            for index, item in reversed(list(enumerate(view_layer.lightgroups))):
+                view_layer.active_lightgroup_index = index
+
+                # Use the Blender operator to remove the lightgroup
+                bpy.ops.scene.view_layer_remove_lightgroup()
+
+                # Force redraw panel so lightgroup gets updated
+                for area in context.screen.areas:
+                    if area.type == 'PROPERTIES':
+                        area.tag_redraw()
+
+        else:
+            self.report({'INFO'}, "All Lightgroups Removed.")
+        return {'FINISHED'}
+
 def draw_main_row(box, obj):
     row = box.row(align=True)
-    row.prop(obj, "is_selected", text="", emboss=True, icon='NONE')
+
+    selected_true = get_icon_id("select_true")
+    selected_false = get_icon_id("select_false")
+        # controls_row.operator("le.select_light", text="",
+        #         icon_value=selected_true if obj.select_get() else selected_false).name = obj.name
+    row.prop(obj, "is_selected", text="", emboss=True, icon_value=selected_true if obj.select_get() else selected_false)
     row.prop(obj, "name", text="")
 
 # -------------------------------------------------------------------------
@@ -210,16 +286,9 @@ class LG_PT_LightGroupPanel(Panel):
 
     def draw(self, context):
         layout = self.layout
-
-        # Check if the render engine is Eevee
-        if context.scene.render.engine == 'BLENDER_EEVEE':
-            layout.label(text="Light Groups are not supported in EEVEE", icon='ERROR')
-            return
-
-        # Existing UI code for other engines (e.g., Cycles)
         view_layer = context.view_layer
 
-        row = layout.row(align=True)
+        row = layout.row()
         col = row.column()
         if hasattr(view_layer, "lightgroups"):
             col.template_list("UI_UL_list", "lightgroups", view_layer, "lightgroups",
@@ -227,13 +296,15 @@ class LG_PT_LightGroupPanel(Panel):
             col = row.column(align=True)
             col.operator("lg_editor.add_light_group", icon='ADD', text="")
             col.operator("lg_editor.remove_light_group", icon='REMOVE', text="")
+
+            col.menu("LIGHT_MT_lightgroup_context_menu", icon='DOWNARROW_HLT', text="")
         else:
             col.label(text="No Lightgroups in this Blender version", icon='ERROR')
 
         row = layout.row(align=True)
         row.operator("lg_editor.assign_light_group", text="Assign")
         row.operator("lg_editor.unassign_light_group", text="Unassign")
-        row.operator("lg_editor.reset_light_selection", text="Deselect All")
+        row.operator("lg_editor.reset_light_selection", text="Reset")
 
         # Add the filter row
         row = layout.row(align=True)
@@ -298,7 +369,6 @@ class LG_PT_LightGroupPanel(Panel):
                 for obj in group_objs:
                     draw_main_row(header_box, obj)
 
-
 # -------------------------------------------------------------------------
 # Classes and Registration
 # -------------------------------------------------------------------------
@@ -311,11 +381,16 @@ classes = (
     LG_ToggleGroup,
     LG_AddLightGroup,
     LG_RemoveLightGroup,
+    LIGHT_MT_lightgroup_context_menu,
+    LG_ResetAllLighgrGroups,
+    LG_RemoveAllLighgrGroups,
     LG_ClearFilter,
     LG_PT_LightGroupPanel,
 )
-
+ 
 def register():
+    # icon_Load()
+
     bpy.types.Scene.selected_render_layer = bpy.props.EnumProperty(
         name="Render Layer",
         description="Select the render layer",
@@ -340,6 +415,7 @@ def register():
         bpy.utils.register_class(cls)
 
 def unregister():
+    global custom_icons
     del bpy.types.Scene.selected_render_layer
     del bpy.types.Scene.light_group_filter
     del bpy.types.Object.is_selected
