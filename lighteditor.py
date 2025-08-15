@@ -11,7 +11,6 @@ from bpy.props import (
 from bpy.app.handlers import persistent
 from bpy.app.translations import contexts as i18n_contexts
 import re, os
-from . icons import get_icon_id
 
 class NullWriter:
     def write(self, text):
@@ -1650,40 +1649,6 @@ class LIGHT_OT_SelectLight(bpy.types.Operator):
             self.report({'ERROR'}, f"Light '{self.name}' not found")
         return {'FINISHED'}
 
-<<<<<<< HEAD:lighteditor.py
-# -------------------------------------------------------------------------
-# Main row UI drawing function
-# -------------------------------------------------------------------------
-def draw_main_row(box, obj):
-    light = obj.data
-    context = bpy.context
-    scene = bpy.context.scene
-    row = box.row(align=True)
-    controls_row = row.row(align=True)
-    controls_row.prop(obj, "light_enabled", text="",
-            icon="OUTLINER_OB_LIGHT" if obj.light_enabled else "LIGHT_DATA")
-    controls_row.active = (obj.light_enabled == True)
-    controls_row.prop(obj, "light_turn_off_others", text="",
-            icon="RADIOBUT_ON" if obj.light_turn_off_others else "RADIOBUT_OFF")
-    if not scene.filter_light_types == 'GROUP':
-        selected_true = get_icon_id("select_true")
-        selected_false = get_icon_id("select_false")
-        controls_row.operator("le.select_light", text="",
-                icon_value=selected_true if obj.select_get() else selected_false).name = obj.name
-    if not scene.filter_light_types == 'GROUP':
-        controls_row.prop(obj, "light_expanded", text="",
-                          emboss=True,
-                          icon='DOWNARROW_HLT' if obj.light_expanded else 'RIGHTARROW')
-    col_name = row.column(align=True)
-    col_name.scale_x = 0.4
-    col_name.prop(obj, "name", text="")
-    col_color = row.column(align=True)
-    col_color.scale_x = 0.25
-    col_color.prop(light, "color", text="")
-    col_energy = row.column(align=True)
-    col_energy.scale_x = 0.35
-    col_energy.prop(light, "energy", text="")
-=======
 def draw_socket_with_icon(layout, socket, label=""):
     row = layout.row(align=True)
     if socket.is_linked:
@@ -2019,7 +1984,6 @@ class LE_OT_IsolateEnvironment(bpy.types.Operator):
             if area.type in {'VIEW_3D', 'NODE_EDITOR'}:
                 area.tag_redraw()
         return {'FINISHED'}
->>>>>>> 3451058b82140f9d0c948d8808dbefaaa7245c70:LightEditor.py
 
 class LIGHT_PT_editor(bpy.types.Panel):
     """Main Light Editor panel in the 3D View sidebar."""
@@ -2527,18 +2491,12 @@ def LE_clear_handler(dummy):
                 if obj.name in context.view_layer.objects:
                     context.view_layer.objects[obj.name].light_enabled = False
 
-<<<<<<< HEAD:lighteditor.py
-# -------------------------------------------------------------------------
-# Registration
-# -------------------------------------------------------------------------
-=======
 @persistent
 def LE_clear_emissive_cache(dummy):
     """Clear the emissive material cache."""
     global emissive_material_cache
     emissive_material_cache.clear()
 
->>>>>>> 3451058b82140f9d0c948d8808dbefaaa7245c70:LightEditor.py
 classes = (
     LIGHT_OT_ToggleGroup,
     LIGHT_OT_ToggleCollection,
@@ -2559,9 +2517,6 @@ classes = (
 )
 
 def register():
-<<<<<<< HEAD:lighteditor.py
-    print("Light Editor add-on registered successfully.")
-=======
     """Register all classes and properties."""
     # Register handlers
     bpy.app.handlers.depsgraph_update_post.append(LE_force_redraw_on_use_nodes_change)
@@ -2596,7 +2551,6 @@ def register():
     # Register properties and classes
     bpy.types.Scene.env_surface_label = bpy.props.StringProperty(default="Surface")
     bpy.types.Scene.env_volume_label = bpy.props.StringProperty(default="Volume")
->>>>>>> 3451058b82140f9d0c948d8808dbefaaa7245c70:LightEditor.py
     bpy.types.Scene.current_active_light = bpy.props.PointerProperty(type=bpy.types.Object)
     bpy.types.Scene.current_exclusive_group = bpy.props.StringProperty()
     
