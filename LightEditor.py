@@ -12,12 +12,6 @@ from bpy.app.handlers import persistent
 from bpy.app.translations import contexts as i18n_contexts
 import re, os
 
-class NullWriter:
-    def write(self, text):
-        pass
-    def flush(self):
-        pass
-
 # --- Global State Tracking (UI visuals, operator states) ---
 isolate_env_header_state = False
 isolate_env_surface_state = False
@@ -57,8 +51,6 @@ class UnifiedOnOffManager:
         Turn off every light, every emissive socket (Emission nodes & Principled BSDF emission),
         and the world shader, except for the single item identified by (except_mode, except_identifier).
         """
-        print(f"[UnifiedOnOffManager] force_all_off called with mode={except_mode}, identifier={except_identifier}")
-
         # --- Backup & disable all lights except the isolated one ---
         keep_lights = set()
         if except_mode in {UnifiedIsolateMode.LIGHT_ROW, UnifiedIsolateMode.LIGHT_GROUP} and except_identifier:
@@ -71,12 +63,9 @@ class UnifiedOnOffManager:
                     obj.hide_viewport, obj.hide_render, getattr(obj, "light_enabled", True)
                 )
                 if obj.name not in keep_lights:
-                    print(f"[UnifiedOnOffManager]   Disabling light: {obj.name}")
                     obj.hide_viewport = True
                     obj.hide_render = True
                     obj.light_enabled = False
-                else:
-                    print(f"[UnifiedOnOffManager]   Keeping light: {obj.name}")
 
         # --- Disable all emissive sockets except the isolated one ---
         for mat in bpy.data.materials:
@@ -89,15 +78,11 @@ class UnifiedOnOffManager:
                     continue
 
                 ident = (mat.name, node.name)
-                print(f"[UnifiedOnOffManager] Processing emissive socket on node: {ident}")
 
                 if not (except_mode == UnifiedIsolateMode.MATERIAL and except_identifier == ident):
                     # backup & disable
                     self._material_backup[ident] = strength_socket.default_value
-                    print(f"[UnifiedOnOffManager]   Disabling emissive socket on: {ident}")
                     strength_socket.default_value = 0.0
-                else:
-                    print(f"[UnifiedOnOffManager]   Keeping emissive socket on: {ident}")
 
         # --- Disconnect world Surface & Volume ---
         world = context.scene.world
@@ -110,7 +95,6 @@ class UnifiedOnOffManager:
                     if sock and sock.is_linked and sock.links:
                         link = sock.links[0]
                         self._env_backup[name] = (link.from_node.name, link.from_socket.name)
-                        print(f"[UnifiedOnOffManager] Disconnecting world {name} link from {link.from_node.name}.{link.from_socket.name}")
                         nt.links.remove(link)
 
         # --- Redraw all areas ---
@@ -119,13 +103,10 @@ class UnifiedOnOffManager:
 
     def restore_all(self):
         """Restore lights, emissive‐socket values, and world links from backup."""
-        print(f"[UnifiedOnOffManager] restore_all called")
-
         # Restore lights
         for obj in bpy.data.objects:
             if obj.type == 'LIGHT' and obj.name in self._light_backup:
                 vp, rp, en = self._light_backup[obj.name]
-                print(f"[UnifiedOnOffManager] Restoring light {obj.name}: vp={vp}, rp={rp}, enabled={en}")
                 obj.hide_viewport = vp
                 obj.hide_render = rp
                 obj.light_enabled = en
@@ -141,7 +122,6 @@ class UnifiedOnOffManager:
                 continue
             strength_socket = node.inputs.get("Strength") or node.inputs.get("Emission Strength")
             if strength_socket:
-                print(f"[UnifiedOnOffManager] Restoring emissive socket on {ident} to {val}")
                 strength_socket.default_value = val
 
         # Restore world links
@@ -156,7 +136,6 @@ class UnifiedOnOffManager:
                     if src and dst and not dst.is_linked:
                         out_sock = src.outputs.get(from_s)
                         if out_sock:
-                            print(f"[UnifiedOnOffManager] Restoring world {name} link from {from_n}.{from_s}")
                             nt.links.new(out_sock, dst)
 
         # Clear backups
@@ -314,21 +293,6 @@ def get_render_layer_items(self, context):
         items.append((current_name, current_name, "Current render layer"))
     return items
 
-def update_render_layer(self, context):
-    """Update the current render layer."""
-    selected = self.selected_render_layer
-    for vl in context.scene.view_layers:
-        if vl.name == selected:
-            context.window.view_layer = vl
-            break
-
-def get_render_layer_items(self, context):
-    """Get the list of render layers for the enum property."""
-    items = []
-    for view_layer in context.scene.view_layers:
-        items.append((view_layer.name, view_layer.name, ""))
-    return items
-
 def gather_layer_collections(parent_lc, result):
     """Recursively gather all layer collections."""
     result.append(parent_lc)
@@ -412,28 +376,6 @@ def get_all_collections(obj):
             all_collections.add(" > ".join(path))
     return sorted(all_collections)
 
-def is_emissive_node_active(node):
-    if node.type == 'EMISSION':
-        strength_socket = node.inputs.get("Strength")
-        color_socket = node.inputs.get("Color")
-    elif node.type == 'BSDF_PRINCIPLED':
-        strength_socket = node.inputs.get("Emission Strength")
-        color_socket = node.inputs.get("Emission Color")
-    else:
-        return False
-
-    if not strength_socket or not color_socket:
-        return False
-
-    # If either socket is linked, assume potentially active
-    if strength_socket.is_linked or color_socket.is_linked:
-        return True
-
-    # If not linked, check values
-    strength = strength_socket.default_value
-    color = color_socket.default_value[:3]  # RGB
-    return strength > 0 and any(c > 0 for c in color)
-
 def find_emissive_objects(context, search_objects=None):
     """Find all objects with emissive materials, including all reachable emissive nodes."""
     global emissive_material_cache
@@ -478,8 +420,7 @@ def find_emissive_objects(context, search_objects=None):
             for link in output_node.inputs['Surface'].links:
                 find_emission_nodes(link.from_node, set(), found_nodes)
             for node in found_nodes:
-                if is_emissive_node_active(node):
-                    emissive_objs.append((obj, mat, node))
+                emissive_objs.append((obj, mat, node))
 
     if use_cache:
         if not emissive_objs:
@@ -489,61 +430,6 @@ def find_emissive_objects(context, search_objects=None):
             emissive_material_cache[cache_key] = emissive_objs
 
     return emissive_objs
-
-def draw_environment_row(box, context):
-    """Draw the environment row in the UI."""
-    world = context.scene.world
-    if not world or not world.use_nodes:
-        return
-    row = box.row(align=True)
-    nt = world.node_tree
-    background_node = next((n for n in nt.nodes if n.type == 'BACKGROUND'), None)
-    if not background_node:
-        return
-    color_input = background_node.inputs.get("Color")
-    strength_input = background_node.inputs.get("Strength")
-    enabled = strength_input.default_value > 0 if strength_input else False
-    icon = 'OUTLINER_OB_LIGHT' if enabled else 'LIGHT_DATA'
-    row.operator("le.toggle_environment", text="", icon=icon, depress=enabled)
-    iso_icon = 'RADIOBUT_ON' if _unified_isolate_manager.is_active(UnifiedIsolateMode.ENVIRONMENT) else 'RADIOBUT_OFF'
-    row.operator("le.isolate_environment", text="", icon=iso_icon)
-    row.operator("le.select_environment", text="", icon='WORLD')
-    world_col = row.column(align=True)
-    world_col.scale_x = 0.5
-    world_col.prop(world, "name", text="")
-    value_row = row.row(align=True)
-    col_color = value_row.row(align=True)
-    col_color.ui_units_x = 4
-    col_strength = value_row.row(align=True)
-    col_strength.ui_units_x = 6
-    if color_input:
-        if color_input.is_linked:
-            color_row = col_color.row(align=True)
-            color_row.alignment = 'EXPAND'
-            color_row.label(icon='NODETREE')
-            color_row.enabled = False
-            color_row.prop(color_input, "default_value", text="")
-        else:
-            try:
-                col_color.prop(color_input, "default_value", text="")
-            except:
-                col_color.label(text="Col?")
-    else:
-        col_color.label(text="")
-    if strength_input:
-        if strength_input.is_linked:
-            strength_row = col_strength.row(align=True)
-            strength_row.alignment = 'EXPAND'
-            strength_row.label(icon='NODETREE')
-            strength_row.enabled = False
-            strength_row.prop(strength_input, "default_value", text="")
-        else:
-            try:
-                col_strength.prop(strength_input, "default_value", text="")
-            except:
-                col_strength.label(text="Str?")
-    else:
-        col_strength.label(text="")
 
 def draw_emissive_row(box, obj, mat, emissive_nodes):
     """
@@ -1085,9 +971,6 @@ class LE_OT_ToggleEmission(bpy.types.Operator):
             return {'CANCELLED'}
         nt = mat.node_tree
 
-        # Debug: log call context
-        print(f"LE_OT_ToggleEmission called for material {self.mat_name}, node_name='{self.node_name}'")
-
         # Determine nodes to toggle
         if self.node_name.strip():
             # Sub-list: toggle specific node
@@ -1107,12 +990,6 @@ class LE_OT_ToggleEmission(bpy.types.Operator):
                 self.report({'WARNING'}, f"No emissive nodes found in material {self.mat_name}")
                 return {'CANCELLED'}
 
-        # Debug: log nodes and their initial states
-        print(f"Toggling {len(nodes_to_toggle)} nodes: {[(n.name, n.type) for n in nodes_to_toggle]}")
-        for node in nodes_to_toggle:
-            strength_socket = node.inputs.get("Strength") if node.type == 'EMISSION' else node.inputs.get("Emission Strength")
-            print(f"Node {node.name}: linked={strength_socket.is_linked}, value={strength_socket.default_value if not strength_socket.is_linked else 'N/A'}")
-
         # Initialize backup storage
         if mat.name not in _emissive_link_backup:
             _emissive_link_backup[mat.name] = {}
@@ -1124,13 +1001,10 @@ class LE_OT_ToggleEmission(bpy.types.Operator):
             (n.inputs.get("Strength") or n.inputs.get("Emission Strength")).default_value > 0
             for n in nodes_to_toggle
         )
-        print(f"Material {self.mat_name} is_on={is_on}")
-
         # Toggle nodes
         for node in nodes_to_toggle:
             strength_socket = node.inputs.get("Strength") if node.type == 'EMISSION' else node.inputs.get("Emission Strength")
             if not strength_socket:
-                print(f"Skipping node {node.name}: no Strength/Emission Strength input")
                 continue
             key = f"{mat.name}:{node.name}:Strength"
             if is_on:
@@ -1139,11 +1013,9 @@ class LE_OT_ToggleEmission(bpy.types.Operator):
                     link = strength_socket.links[0]
                     store[key] = ('LINK', link.from_node.name, link.from_socket.name)
                     nt.links.remove(link)
-                    print(f"Stored link for {node.name}: {link.from_node.name}.{link.from_socket.name}")
                 else:
                     store[key] = ('VALUE', strength_socket.default_value)
                     strength_socket.default_value = 0
-                    print(f"Stored value for {node.name}: {strength_socket.default_value}")
             else:
                 # Turn on: restore state or set to 1.0
                 if key in store:
@@ -1153,23 +1025,15 @@ class LE_OT_ToggleEmission(bpy.types.Operator):
                         from_socket = from_node.outputs.get(data[1]) if from_node else None
                         if from_socket:
                             nt.links.new(from_socket, strength_socket)
-                            print(f"Restored link for {node.name}: {data[0]}.{data[1]}")
-                        else:
-                            print(f"Failed to restore link for {node.name}: node/socket not found")
                     else:
                         strength_socket.default_value = data[0]
-                        print(f"Restored value for {node.name}: {data[0]}")
                     del store[key]
                 else:
                     strength_socket.default_value = 1.0
-                    print(f"No backup for {node.name}, set to 1.0")
 
         # Clean up empty backup
         if not store:
             _emissive_link_backup.pop(mat.name, None)
-
-        # Debug: log final backup state
-        print(f"Backup for {mat.name}: {store}")
 
         # Redraw UI
         for area in context.screen.areas:
@@ -1672,13 +1536,6 @@ class LIGHT_OT_SelectLight(bpy.types.Operator):
             self.report({'ERROR'}, f"Light '{self.name}' not found")
         return {'FINISHED'}
 
-def draw_socket_with_icon(layout, socket, label=""):
-    row = layout.row(align=True)
-    if socket.is_linked:
-        row.enabled = False
-    row.template_node_socket(color=socket.draw_color)
-    row.prop(socket, "default_value", text=label)
-
 def draw_socket_with_icon(layout, socket, text="", linked_only=False, icon='NODETREE'):
     """Draws a socket's value with an icon if linked, or just the value if not."""
     if socket.is_linked:
@@ -1725,157 +1582,6 @@ def group_emissive_by_material(pairs):
     result = [(bpy.data.objects[obj_name], bpy.data.materials[mat_name], nodes)
               for (obj_name, mat_name), nodes in grouped.items()]
     return result
-
-def draw_emissive_grouped_by_ntree(scene, container_box, emissive_pairs):
-    """Group and display emissive materials by shared node trees with collapsible sections."""
-    emissive_by_ntree = defaultdict(list)
-    for obj, mat in emissive_pairs:
-        if mat.use_nodes and mat.node_tree:
-            emissive_by_ntree[mat.node_tree].append((obj, mat))
-
-    for ntree in sorted(emissive_by_ntree, key=lambda nt: emissive_by_ntree[nt][0][1].name.lower()):
-        entries = emissive_by_ntree[ntree]
-        group_key = f"ntree_{ntree.as_pointer()}"
-        if group_key not in group_collapse_dict:
-            group_collapse_dict[group_key] = False
-        collapsed = group_collapse_dict[group_key]
-
-        first_obj, first_mat = entries[0]
-
-        # Draw main row
-        header = container_box.box()
-        row = header.row(align=True)
-        row.operator("le.toggle_emission", text="", icon='OUTLINER_OB_LIGHT', depress=True).mat_name = first_mat.name
-        row.operator("le.isolate_emissive", text="", icon='RADIOBUT_ON' if emissive_isolate_icon_state.get(first_mat.name, False) else 'RADIOBUT_OFF').mat_name = first_mat.name
-        row.operator("le.select_light", text="", icon='RESTRICT_SELECT_ON' if first_obj.select_get() else 'RESTRICT_SELECT_OFF').name = first_obj.name
-
-        expand_col = row.column(align=True)
-        expand_op = expand_col.operator("light_editor.toggle_group", text="", icon='RIGHTARROW' if collapsed else 'DOWNARROW_HLT')
-        expand_op.group_key = group_key
-        expand_col.enabled = len(entries) > 1
-
-        row.column(align=True).prop(first_obj, "name", text="")
-        row.column(align=True).prop(first_mat, "name", text="")
-
-        # Always show sockets, possibly with NODETREE icons
-        output_node = next((n for n in ntree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
-        surf_input = output_node.inputs.get('Surface') if output_node else None
-        from_node = surf_input.links[0].from_node if surf_input and surf_input.is_linked else None
-
-        emission_node = None
-        principled_node = None
-        def find_nodes(node, visited):
-            nonlocal emission_node, principled_node
-            if not node or node in visited:
-                return
-            visited.add(node)
-            if node.type == 'EMISSION':
-                emission_node = node
-            elif node.type == 'BSDF_PRINCIPLED':
-                principled_node = node
-            for inp in node.inputs:
-                if inp.is_linked:
-                    for link in inp.links:
-                        find_nodes(link.from_node, visited)
-
-        find_nodes(from_node, set())
-
-        color_input = None
-        strength_input = None
-        if emission_node:
-            color_input = emission_node.inputs.get("Color")
-            strength_input = emission_node.inputs.get("Strength")
-        elif principled_node:
-            color_input = principled_node.inputs.get("Emission Color")
-            strength_input = principled_node.inputs.get("Emission Strength")
-
-        col_color = row.column(align=True)
-        col_strength = row.column(align=True)
-
-        def draw_socket_with_icon(col, socket):
-            if socket:
-                if socket.is_linked:
-                    r = col.row(align=True)
-                    r.alignment = 'EXPAND'
-                    r.label(icon='NODETREE')
-                    r.enabled = False
-                    r.prop(socket, "default_value", text="")
-                else:
-                    try:
-                        col.prop(socket, "default_value", text="")
-                    except:
-                        col.label(text="?")
-            else:
-                col.label(text="")
-
-        draw_socket_with_icon(col_color, color_input)
-        draw_socket_with_icon(col_strength, strength_input)
-
-        if not collapsed:
-            obj, mat = entries[0]
-            nt = mat.node_tree
-            for node in nt.nodes:
-                if node.type in {'EMISSION', 'BSDF_PRINCIPLED'}:
-                    draw_emissive_node_row(container_box, obj, mat, node)
-
-
-def draw_emissive_node_row(box, obj, mat, node):
-    """Draws a row for a specific emissive node inside a material."""
-    row = box.row(align=True)
-
-    if node.type == 'EMISSION':
-        color_input = node.inputs.get("Color")
-        strength_input = node.inputs.get("Strength")
-    elif node.type == 'BSDF_PRINCIPLED':
-        color_input = node.inputs.get("Emission Color")
-        strength_input = node.inputs.get("Emission Strength")
-    else:
-        return
-
-    enabled = False
-    if strength_input:
-        if strength_input.is_linked:
-            enabled = True
-        else:
-            try:
-                enabled = strength_input.default_value > 0
-            except:
-                pass
-    if not enabled and color_input:
-        try:
-            enabled = any(c > 0.0 for c in color_input.default_value[:3])
-        except:
-            pass
-
-    icon = 'OUTLINER_OB_LIGHT' if enabled else 'LIGHT_DATA'
-
-    # Toggle emission
-    op = row.operator("le.toggle_emission", text="", icon=icon, depress=enabled)
-    op.mat_name = mat.name
-
-    # Per-node isolate button
-    iso_key = (mat.name, node.name)
-    iso_icon = 'RADIOBUT_ON' if emissive_isolate_icon_state.get(iso_key, False) else 'RADIOBUT_OFF'
-    op = row.operator("le.isolate_emissive", text="", icon=iso_icon)
-    op.mat_name = mat.name
-    op.node_name = node.name
-
-    # Label
-    row.label(text=f"{mat.name} / {node.name}")
-
-    col_color = row.column(align=True)
-    col_strength = row.column(align=True)
-
-    if color_input:
-        draw_socket_with_icon(col_color, color_input)
-    else:
-        col_color.label(text="")
-
-    if strength_input:
-        draw_socket_with_icon(col_strength, strength_input)
-    else:
-        col_strength.label(text="")
-
 
 def draw_main_row(box, obj):
     """Draw a single light object row in the UI, with equal-width color/strength/exposure fields."""
@@ -2471,12 +2177,6 @@ def LE_update_light_enabled_on_visibility_change(scene):
         pass
         
 @persistent
-def LE_clear_emission_links(dummy):
-    """Clear stale _emission_links data on scene load."""
-    for mat in bpy.data.materials:
-        if "_emission_links" in mat:
-            del mat["_emission_links"]
-@persistent
 def LE_force_redraw_on_use_nodes_change(scene):
     """Force redraw when use_nodes changes."""
     try:
@@ -2710,8 +2410,7 @@ def unregister():
 if __name__ == "__main__":
     try:
         unregister()
-    except Exception as e:
-        print(f"⚠ Unregister failed (probably first run): {e}")
+    except Exception:
+        pass
     register()
-    print("✅ Registered updated LightEditor")
 
