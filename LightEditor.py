@@ -615,7 +615,7 @@ def use_mnee(context):
 
 def draw_extra_params(self, box, obj, light):
     """Draw extra light parameters based on the light type and render engine."""
-    if light and isinstance(light, bpy.types.Light) and not light.use_nodes:
+    if light and isinstance(light, bpy.types.Light):
         layout = box
         row = layout.row()
         row.prop(light, "type", expand=True)
@@ -1596,11 +1596,9 @@ def draw_main_row(box, obj):
                   icon="RADIOBUT_ON" if obj.light_turn_off_others else "RADIOBUT_OFF")
     controls.operator("le.select_light", text="",
                       icon="RESTRICT_SELECT_ON" if obj.select_get() else "RESTRICT_SELECT_OFF").name = obj.name
-    exp = controls.row(align=True)
-    exp.enabled = not light.use_nodes
-    exp.prop(obj, "light_expanded", text="",
-             emboss=True,
-             icon='DOWNARROW_HLT' if obj.light_expanded else 'RIGHTARROW')
+    controls.prop(obj, "light_expanded", text="",
+                  emboss=True,
+                  icon='DOWNARROW_HLT' if obj.light_expanded else 'RIGHTARROW')
 
     # --- Name column ---
     col_name = row.column(align=True)
@@ -1806,7 +1804,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                 lb6 = ab.box()
                 for o in sorted(lights, key=lambda x: x.name.lower()):
                     draw_main_row(lb6, o)
-                    if o.light_expanded and not o.data.use_nodes:
+                    if o.light_expanded:
                         eb6 = lb6.box()
                         draw_extra_params(self, eb6, o, o.data)
             eb7 = layout.box()
@@ -1892,7 +1890,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                             lb = kb.box()
                             for o in sorted(lights_in, key=lambda x: x.name.lower()):
                                 draw_main_row(lb, o)
-                                if o.light_expanded and not o.data.use_nodes:
+                                if o.light_expanded:
                                     eb = lb.box()
                                     draw_extra_params(self, eb, o, o.data)
         elif scene.filter_light_types == 'COLLECTION':
@@ -1940,7 +1938,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                             lb = header_box.box()
                             for o in sorted(lights_in, key=lambda x: x.name.lower()):
                                 draw_main_row(lb, o)
-                                if o.light_expanded and not o.data.use_nodes:
+                                if o.light_expanded:
                                     eb = lb.box()
                                     draw_extra_params(self, eb, o, o.data)
                         emissives_in_collection = [(o, m, n) for o, m, n in filtered_emissive_pairs if any(c == coll for c in o.users_collection)]
@@ -1975,7 +1973,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                         lb2 = nb.box()
                         for o in sorted(no_lights, key=lambda x: x.name.lower()):
                             draw_main_row(lb2, o)
-                            if o.light_expanded and not o.data.use_nodes:
+                            if o.light_expanded:
                                 eb2 = lb2.box()
                                 draw_extra_params(self, eb2, o, o.data)
                         if no_emissives:
@@ -2010,7 +2008,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                     sb = sb.box()
                     for o in sorted(selected_lights, key=lambda x: x.name.lower()):
                         draw_main_row(sb, o)
-                        if o.light_expanded and not o.data.use_nodes:
+                        if o.light_expanded:
                             eb = sb.box()
                             draw_extra_params(self, eb, o, o.data)
             # Selected Emissive Meshes
@@ -2068,7 +2066,7 @@ class LIGHT_PT_editor(bpy.types.Panel):
                     nslb = nsl_box.box()
                     for o in sorted(not_selected_lights, key=lambda x: x.name.lower()):
                         draw_main_row(nslb, o)
-                        if o.light_expanded and not o.data.use_nodes:
+                        if o.light_expanded:
                             eb = nslb.box()
                             draw_extra_params(self, eb, o, o.data)
             # Not Selected Emissive Meshes
