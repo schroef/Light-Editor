@@ -33,6 +33,11 @@ _light_isolate_state_backup = {}
 emissive_isolate_icon_state = {}
 _emissive_link_backup = {}
 
+# Re-entrancy guard: set while the depsgraph handler reconciles light_enabled
+# from hide_viewport/hide_render, so update_light_enabled() doesn't write the
+# flags straight back and couple the two together.
+_syncing_visibility = False
+
 def is_blender_4_5_or_higher():
     """Check if the Blender version is 4.5 or higher."""
     return bpy.app.version >= (4, 5, 0)
@@ -311,8 +316,16 @@ def get_layer_collection_by_name(layer_collection, coll_name):
 
 def update_light_enabled(self, context):
     """Update light visibility based on the light_enabled property."""
-    self.hide_viewport = not self.light_enabled
-    self.hide_render = not self.light_enabled
+    # When the depsgraph handler is the one reconciling light_enabled from the
+    # visibility flags, don't write the flags back — otherwise hiding a light in
+    # render alone would also hide it in the viewport (and vice versa).
+    if _syncing_visibility:
+        return
+    hidden = not self.light_enabled
+    if self.hide_viewport != hidden:
+        self.hide_viewport = hidden
+    if self.hide_render != hidden:
+        self.hide_render = hidden
 
 def update_light_turn_off_others(self, context):
     global group_checkbox_2_state, emissive_isolate_icon_state
@@ -431,6 +444,48 @@ def find_emissive_objects(context, search_objects=None):
 
     return emissive_objs
 
+
+class LE_OT_ShowNodes(bpy.types.Operator):
+    """Open this node tree in a Shader Editor"""
+    bl_idname = "le.show_nodes"
+    bl_label = "See Nodes"
+    bl_description = ("This value is driven by a node link and can't be edited here.\n"
+                      "Click to show its node tree in an open Shader Editor")
+
+    obj_name: StringProperty()
+    shader_type: StringProperty(default='OBJECT')
+
+    def execute(self, context):
+        # Make the owning object active so the Shader Editor follows it.
+        if self.shader_type == 'OBJECT' and self.obj_name:
+            obj = context.view_layer.objects.get(self.obj_name)
+            if obj:
+                obj.select_set(True)
+                context.view_layer.objects.active = obj
+
+        for area in context.screen.areas:
+            if area.type != 'NODE_EDITOR':
+                continue
+            for space in area.spaces:
+                if space.type == 'NODE_EDITOR':
+                    space.tree_type = 'ShaderNodeTree'
+                    space.shader_type = self.shader_type
+            area.tag_redraw()
+            return {'FINISHED'}
+
+        self.report({'INFO'}, "Open a Shader Editor to see the node tree")
+        return {'CANCELLED'}
+
+
+def draw_see_nodes(layout, obj_name="", shader_type='OBJECT'):
+    """Draw the 'See Nodes' indicator for a socket driven by a node link."""
+    row = layout.row(align=True)
+    row.alignment = 'EXPAND'
+    op = row.operator("le.show_nodes", text="See Nodes", icon='NODETREE', emboss=False)
+    op.obj_name = obj_name
+    op.shader_type = shader_type
+
+
 def draw_emissive_row(box, obj, mat, emissive_nodes):
     """
     Draw a row for a material, with a collapsible sub-list for emissive nodes.
@@ -490,17 +545,11 @@ def draw_emissive_row(box, obj, mat, emissive_nodes):
         # Color placeholder
         col_color = row.column(align=True)
         col_color.ui_units_x = col_width
-        rc = col_color.row(align=True)
-        rc.alignment = 'EXPAND'
-        rc.label(icon='NODETREE', text="See Nodes")
-        rc.enabled = False
+        draw_see_nodes(col_color, obj_name=obj.name)
         # Strength placeholder
         col_strength = row.column(align=True)
         col_strength.ui_units_x = col_width
-        rs = col_strength.row(align=True)
-        rs.alignment = 'EXPAND'
-        rs.label(icon='NODETREE', text="See Nodes")
-        rs.enabled = False
+        draw_see_nodes(col_strength, obj_name=obj.name)
     else:
         # --- Regular layout for single-node without links ---
         # Object name
@@ -557,10 +606,7 @@ def draw_emissive_row(box, obj, mat, emissive_nodes):
             color_in = subnode.inputs.get("Color") if subnode.type == 'EMISSION' else subnode.inputs.get("Emission Color")
             if color_in:
                 if color_in.is_linked:
-                    rc = c_col.row(align=True)
-                    rc.alignment = 'EXPAND'
-                    rc.label(icon='NODETREE', text="See Nodes")
-                    rc.enabled = False
+                    draw_see_nodes(c_col, obj_name=obj.name)
                 else:
                     draw_socket_with_icon(c_col, color_in, text="")
             else:
@@ -571,10 +617,7 @@ def draw_emissive_row(box, obj, mat, emissive_nodes):
             c_str.ui_units_x = 6
             if s_in:
                 if s_in.is_linked:
-                    rs = c_str.row(align=True)
-                    rs.alignment = 'EXPAND'
-                    rs.label(icon='NODETREE', text="See Nodes")
-                    rs.enabled = False
+                    draw_see_nodes(c_str, obj_name=obj.name)
                 else:
                     draw_socket_with_icon(c_str, s_in, text="")
             else:
@@ -1630,10 +1673,7 @@ def draw_main_row(box, obj):
                 # — Color —
                 if color_input:
                     if color_input.is_linked:
-                        rc = col_color.row(align=True)
-                        rc.alignment = 'EXPAND'
-                        rc.label(icon='NODETREE', text="See Nodes")
-                        rc.enabled = False
+                        draw_see_nodes(col_color, obj_name=obj.name)
                     else:
                         col_color.prop(color_input, "default_value", text="")
                 else:
@@ -1642,10 +1682,7 @@ def draw_main_row(box, obj):
                 # — Strength —
                 if strength_input:
                     if strength_input.is_linked:
-                        rs = col_strength.row(align=True)
-                        rs.alignment = 'EXPAND'
-                        rs.label(icon='NODETREE', text="See Nodes")
-                        rs.enabled = False
+                        draw_see_nodes(col_strength, obj_name=obj.name)
                     else:
                         draw_socket_with_icon(col_strength, strength_input, text="")
                 else:
@@ -2159,21 +2196,47 @@ def draw_environment_single_row(box, context, filter_str=""):
 @persistent
 def LE_update_light_enabled_on_visibility_change(scene):
     """Update light_enabled property when hide_viewport or hide_render changes."""
+    global _syncing_visibility
     try:
         context = bpy.context
+        needs_redraw = False
         for obj in context.scene.objects:
             if obj.type == 'LIGHT' and obj.name in context.view_layer.objects:
                 # Consider the light disabled if either viewport or render is hidden
                 new_enabled = not (obj.hide_viewport or obj.hide_render)
                 if obj.light_enabled != new_enabled:
-                    obj.light_enabled = new_enabled
-                    # Redraw relevant UI areas
-                    for area in context.screen.areas:
-                        if area.type in {'VIEW_3D', 'PROPERTIES', 'NODE_EDITOR'}:
-                            area.tag_redraw()
+                    # Mirror the flags into light_enabled without letting
+                    # update_light_enabled() push them back out again.
+                    _syncing_visibility = True
+                    try:
+                        obj.light_enabled = new_enabled
+                    finally:
+                        _syncing_visibility = False
+                    needs_redraw = True
+        if needs_redraw:
+            for area in context.screen.areas:
+                if area.type in {'VIEW_3D', 'PROPERTIES', 'NODE_EDITOR'}:
+                    area.tag_redraw()
     except Exception as e:
         pass
         
+@persistent
+def LE_set_initial_render_layer(dummy):
+    """Point the Light Editor's render layer selector at the active view layer.
+
+    Defined at module level so unregister() can actually remove it — a nested
+    function creates a new object each register(), so the matching remove()
+    never finds it and every enable leaks another handler.
+    """
+    if hasattr(bpy.types.Scene, 'light_editor_selected_render_layer'):
+        try:
+            current_vl_name = bpy.context.view_layer.name
+            if bpy.context.scene.view_layers.get(current_vl_name):
+                bpy.context.scene.light_editor_selected_render_layer = current_vl_name
+        except Exception:
+            pass
+
+
 @persistent
 def LE_force_redraw_on_use_nodes_change(scene):
     """Force redraw when use_nodes changes."""
@@ -2225,6 +2288,7 @@ classes = (
     LIGHT_OT_ToggleGroupExclusive,
     LIGHT_OT_ClearFilter,
     LIGHT_OT_SelectLight,
+    LE_OT_ShowNodes,
     LE_OT_ToggleEmission,
     LE_OT_isolate_emissive,
     EMISSIVE_OT_ToggleGroupAllOff,
@@ -2239,12 +2303,17 @@ classes = (
 
 def register():
     """Register all classes and properties."""
-    # Register handlers
-    bpy.app.handlers.depsgraph_update_post.append(LE_force_redraw_on_use_nodes_change)
-    bpy.app.handlers.load_post.append(LE_clear_handler)
-    bpy.app.handlers.load_post.append(LE_check_lights_enabled)
-    bpy.app.handlers.depsgraph_update_post.append(LE_clear_emissive_cache)
-    bpy.app.handlers.depsgraph_update_post.append(LE_update_light_enabled_on_visibility_change)
+    # Register handlers. Appends are guarded so a partially-failed unregister
+    # can't leave duplicates stacked up on the depsgraph.
+    for handler_list, handler in (
+        (bpy.app.handlers.depsgraph_update_post, LE_force_redraw_on_use_nodes_change),
+        (bpy.app.handlers.load_post, LE_clear_handler),
+        (bpy.app.handlers.load_post, LE_check_lights_enabled),
+        (bpy.app.handlers.depsgraph_update_post, LE_clear_emissive_cache),
+        (bpy.app.handlers.depsgraph_update_post, LE_update_light_enabled_on_visibility_change),
+    ):
+        if handler not in handler_list:
+            handler_list.append(handler)
 
     # Register the new render layer property
     bpy.types.Scene.light_editor_selected_render_layer = bpy.props.EnumProperty(
@@ -2254,19 +2323,11 @@ def register():
         update=update_render_layer,
     )
     # Set initial render layer
-    def set_initial_render_layer(dummy):
-        if hasattr(bpy.types.Scene, 'light_editor_selected_render_layer'):
-            try:
-                current_vl_name = bpy.context.view_layer.name
-                if bpy.context.scene.view_layers.get(current_vl_name):
-                    bpy.context.scene.light_editor_selected_render_layer = current_vl_name
-            except:
-                pass
-
-    bpy.app.handlers.load_post.append(set_initial_render_layer)
+    if LE_set_initial_render_layer not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(LE_set_initial_render_layer)
     try:
-        set_initial_render_layer(None)
-    except:
+        LE_set_initial_render_layer(None)
+    except Exception:
         pass
 
     # Register properties and classes
@@ -2348,17 +2409,9 @@ def unregister():
     if LE_clear_emissive_cache in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(LE_clear_emissive_cache)
     
-    # Remove set_initial_render_layer handler
-    def set_initial_render_layer(dummy):
-        if hasattr(bpy.types.Scene, 'light_editor_selected_render_layer'):
-            try:
-                current_vl_name = bpy.context.view_layer.name
-                if bpy.context.scene.view_layers.get(current_vl_name):
-                    bpy.context.scene.light_editor_selected_render_layer = current_vl_name
-            except:
-                pass
-    if set_initial_render_layer in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(set_initial_render_layer)
+    # Remove the render layer handler
+    if LE_set_initial_render_layer in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(LE_set_initial_render_layer)
 
     # Unregister properties
     if hasattr(bpy.types.Scene, 'light_editor_selected_render_layer'):
@@ -2400,10 +2453,16 @@ def unregister():
     if hasattr(bpy.types.Object, 'light_expanded'):
         del bpy.types.Object.light_expanded
 
-    # Unregister classes
+    # Unregister classes.
+    # Note: don't guard on hasattr(bpy.types, cls.__name__) — bpy.types exposes
+    # classes under their RNA identifier (derived from bl_idname), not their
+    # Python class name, so that check is always False and leaves everything
+    # registered. Re-enabling the add-on then fails with "already registered".
     for cls in reversed(classes):
-        if hasattr(bpy.types, cls.__name__):
+        try:
             bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass
 
 if __name__ == "__main__":
     try:

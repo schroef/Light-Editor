@@ -15,13 +15,19 @@ bl_info = {
 import bpy
 from bpy.types import Operator, Panel
 from bpy.props import StringProperty
+from bpy.app.handlers import persistent
 
 # -------------------------------------------------------------------------
 # Scene-scoped state
 # -------------------------------------------------------------------------
-# Dictionaries for collapse and exclusivity (persist across redraws)
-bpy.types.Scene.group_collapse_dict = {}
-bpy.types.Scene.group_exclusive_dict = {}
+# Dictionaries for collapse and exclusivity (persist across redraws).
+# These are attached to bpy.types.Scene in register() rather than at module
+# import time: unregister() deletes them, and on a re-enable the module is
+# already imported so import-time assignments would never run again.
+#
+# Backup of per-light visibility taken when a group is soloed, so that
+# un-soloing restores the user's original state instead of blanket-clearing it.
+_exclusive_visibility_backup = {}
 
 # -------------------------------------------------------------------------
 # Helpers
@@ -36,6 +42,31 @@ def _display_name(obj):
     if isinstance(obj, bpy.types.World):
         return f"{obj.name} (Environment)"
     return obj.name
+
+def _is_selected(obj):
+    """Selection state of an object, safe to call from a draw function.
+
+    select_get() raises for objects outside the current view layer (e.g. in an
+    excluded collection), which would break the whole panel.
+    """
+    try:
+        return obj.select_get()
+    except RuntimeError:
+        return False
+
+@persistent
+def LG_clear_state_on_load(dummy):
+    """Drop solo state on file load.
+
+    The solo flag and its visibility backup live in memory, not in the .blend,
+    so carrying them into a freshly loaded file would leave the UI claiming a
+    group is soloed while the backup refers to objects from the old scene.
+    """
+    _exclusive_visibility_backup.clear()
+    if hasattr(bpy.types.Scene, "group_exclusive_dict"):
+        bpy.types.Scene.group_exclusive_dict.clear()
+    if hasattr(bpy.types.Scene, "group_collapse_dict"):
+        bpy.types.Scene.group_collapse_dict.clear()
 
 # -------------------------------------------------------------------------
 # Render Layer Functions
@@ -146,10 +177,18 @@ class LG_ToggleLightSelection(Operator):
 
     def execute(self, context):
         light_obj = context.scene.objects.get(self.light_name)
-        if light_obj:
-            light_obj.is_selected = not light_obj.is_selected
-        else:
+        if not light_obj:
             self.report({'WARNING'}, f"Light '{self.light_name}' not found.")
+            return {'CANCELLED'}
+
+        # Toggle from the real selection state, not the mirrored property —
+        # the property goes stale when the user selects in the viewport.
+        select = not _is_selected(light_obj)
+        if light_obj.name in context.view_layer.objects:
+            light_obj.select_set(select)
+            if select:
+                context.view_layer.objects.active = light_obj
+        light_obj.is_selected = select
         return {'FINISHED'}
 
 class LG_ToggleGroupExclusive(Operator):
@@ -160,19 +199,48 @@ class LG_ToggleGroupExclusive(Operator):
     group_key: bpy.props.StringProperty()
 
     def execute(self, context):
-        is_exclusive = not context.scene.group_exclusive_dict.get(self.group_key, False)
-        context.scene.group_exclusive_dict[self.group_key] = is_exclusive
+        exclusive_dict = context.scene.group_exclusive_dict
+        is_exclusive = not exclusive_dict.get(self.group_key, False)
+
+        # Soloing is mutually exclusive: turning one group on clears the rest,
+        # so we never stack two solos and lose track of the original state.
+        was_soloing = any(exclusive_dict.values())
+        exclusive_dict.clear()
 
         if is_exclusive:
+            # Only snapshot when nothing was soloed yet, otherwise switching
+            # straight from one solo to another would capture the soloed
+            # (already hidden) state as if it were the user's own.
+            if not was_soloing:
+                _exclusive_visibility_backup.clear()
+                for obj in context.scene.objects:
+                    if obj.type == 'LIGHT':
+                        _exclusive_visibility_backup[obj.name] = (
+                            obj.hide_viewport, obj.hide_render
+                        )
+
+            exclusive_dict[self.group_key] = True
             exclusive_group_name = self.group_key.replace("group_", "")
             for obj in context.scene.objects:
                 if obj.type == 'LIGHT':
-                    obj.hide_viewport = getattr(obj, "lightgroup", "") != exclusive_group_name
+                    hidden = getattr(obj, "lightgroup", "") != exclusive_group_name
+                    obj.hide_viewport = hidden
+                    obj.hide_render = hidden
             # World has no viewport toggle; leave it untouched.
         else:
+            # Restore what the user had before soloing rather than forcing
+            # everything visible (which wiped their own hidden lights).
             for obj in context.scene.objects:
-                if obj.type == 'LIGHT':
-                    obj.hide_viewport = False
+                if obj.type != 'LIGHT':
+                    continue
+                vp, rp = _exclusive_visibility_backup.get(obj.name, (False, False))
+                obj.hide_viewport = vp
+                obj.hide_render = rp
+            _exclusive_visibility_backup.clear()
+
+        for area in context.screen.areas:
+            if area.type in {'VIEW_3D', 'PROPERTIES'}:
+                area.tag_redraw()
         return {'FINISHED'}
 
 class LG_ToggleGroup(Operator):
@@ -241,19 +309,29 @@ class LG_RemoveLightGroup(Operator):
 # -------------------------------------------------------------------------
 def draw_main_row(box, obj):
     """Draw a row for either a LIGHT object or the Environment (World).
-    - LIGHT: checkbox toggles Object.is_selected (also viewport selection)
-    - WORLD: checkbox toggles World.le_is_selected (for Assign/Unassign)
+    - LIGHT: toggles viewport selection
+    - WORLD: toggles World.le_is_selected (for Assign/Unassign)
+
+    Both use the same select-cursor icon as the Light Editor panel — a
+    checkbox reads as "on/off", which isn't what this control does.
     """
     row = box.row(align=True)
 
     if isinstance(obj, bpy.types.World):
-        # Selectable Environment checkbox (doesn't affect viewport selection)
-        sel = row.row(align=True)
-        sel.prop(obj, "le_is_selected", text="", emboss=True, icon='NONE')
+        # Environment can't be selected in the viewport, so this stays a plain
+        # property, but it's drawn with the same icon for a consistent panel.
+        selected = getattr(obj, "le_is_selected", False)
+        row.prop(obj, "le_is_selected", text="", emboss=True,
+                 icon='RESTRICT_SELECT_ON' if selected else 'RESTRICT_SELECT_OFF')
         row.label(text=_display_name(obj), icon='WORLD')
     else:
-        # LIGHT object row (kept minimal per previous version)
-        row.prop(obj, "is_selected", text="", emboss=True, icon='NONE')
+        # Drive the icon from the real selection state so the panel stays
+        # correct when the user selects lights in the viewport or outliner.
+        selected = _is_selected(obj)
+        op = row.operator("lg_editor.toggle_light_selection", text="",
+                          icon='RESTRICT_SELECT_ON' if selected else 'RESTRICT_SELECT_OFF',
+                          depress=selected)
+        op.light_name = obj.name
         row.label(text=obj.name, icon='LIGHT')
 
 # -------------------------------------------------------------------------
@@ -310,10 +388,13 @@ class LG_PT_LightGroupPanel(Panel):
 
         if hasattr(view_layer, "lightgroups"):
             for lg in view_layer.lightgroups:
+                # Membership is about light group assignment, not visibility.
+                # Filtering on hide_render here made lights disappear from the
+                # list whenever anything hid them (solo/exclusive, the Light
+                # Editor's enable toggle, or a manual outliner click).
                 lights_in_group = [
                     obj for obj in scene.objects
                     if obj.type == 'LIGHT'
-                    and not obj.hide_render
                     and getattr(obj, "lightgroup", "") == lg.name
                 ]
                 # Include the World if it's assigned to this group
@@ -325,7 +406,6 @@ class LG_PT_LightGroupPanel(Panel):
         not_assigned = [
             obj for obj in scene.objects
             if obj.type == 'LIGHT'
-            and not obj.hide_render
             and not getattr(obj, "lightgroup", "")
         ]
         if capable_world and not getattr(capable_world, "lightgroup", ""):
@@ -384,6 +464,10 @@ classes = (
 )
 
 def register():
+    # UI state dicts (plain Python attrs on the Scene type, shared scene-wide)
+    bpy.types.Scene.group_collapse_dict = {}
+    bpy.types.Scene.group_exclusive_dict = {}
+
     # Scene properties
     bpy.types.Scene.selected_render_layer = bpy.props.EnumProperty(
         name="Render Layer",
@@ -418,21 +502,43 @@ def register():
 
     bpy.utils.register_class(LG_PT_LightGroupPanel)
 
+    if LG_clear_state_on_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(LG_clear_state_on_load)
+
 
 def unregister():
-    # Remove props
-    del bpy.types.Scene.selected_render_layer
-    del bpy.types.Scene.light_group_filter
-    del bpy.types.Object.is_selected
-    if hasattr(bpy.types.World, "le_is_selected"):
-        del bpy.types.World.le_is_selected
-    del bpy.types.Scene.group_collapse_dict
-    del bpy.types.Scene.group_exclusive_dict
+    if LG_clear_state_on_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(LG_clear_state_on_load)
+
+    _exclusive_visibility_backup.clear()
+
+    # Remove props. Each removal is guarded so that one failure can't abort the
+    # rest of unregister() — leftover registered classes make a subsequent
+    # enable fail with "already registered as a subclass".
+    for owner, prop in (
+        (bpy.types.Scene, "selected_render_layer"),
+        (bpy.types.Scene, "light_group_filter"),
+        (bpy.types.Scene, "group_collapse_dict"),
+        (bpy.types.Scene, "group_exclusive_dict"),
+        (bpy.types.Object, "is_selected"),
+        (bpy.types.World, "le_is_selected"),
+    ):
+        if hasattr(owner, prop):
+            try:
+                delattr(owner, prop)
+            except (AttributeError, TypeError):
+                pass
 
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass
 
-    bpy.utils.unregister_class(LG_PT_LightGroupPanel)
+    try:
+        bpy.utils.unregister_class(LG_PT_LightGroupPanel)
+    except (RuntimeError, ValueError):
+        pass
 
 
 if __name__ == "__main__":
