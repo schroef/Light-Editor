@@ -2194,8 +2194,20 @@ def draw_environment_single_row(box, context, filter_str=""):
             row.prop(scene, "env_volume_label", text="")
 
 @persistent
-def LE_update_light_enabled_on_visibility_change(scene):
-    """Update light_enabled property when hide_viewport or hide_render changes."""
+def LE_update_light_enabled_on_visibility_change(scene, depsgraph=None):
+    """Mirror hide_viewport/hide_render into the add-on's light_enabled flag.
+
+    This only ever writes light_enabled, which is this add-on's own property —
+    it does not touch any Blender-native data, so hiding a light in the
+    outliner behaves exactly as stock Blender does. The write is guarded by
+    _syncing_visibility so the property's update callback can't push the
+    visibility flags back out and couple them together.
+
+    The scan is deliberately not driven off depsgraph.updates: hide_render is
+    a render-only flag that doesn't reliably tag an object in the viewport
+    depsgraph, and a viewport-hidden object drops out of the evaluated graph
+    entirely, so filtering on updates would silently miss changes.
+    """
     global _syncing_visibility
     try:
         context = bpy.context
@@ -2214,8 +2226,9 @@ def LE_update_light_enabled_on_visibility_change(scene):
                         _syncing_visibility = False
                     needs_redraw = True
         if needs_redraw:
+            # light_enabled is only shown in this add-on's sidebar panels.
             for area in context.screen.areas:
-                if area.type in {'VIEW_3D', 'PROPERTIES', 'NODE_EDITOR'}:
+                if area.type == 'VIEW_3D':
                     area.tag_redraw()
     except Exception as e:
         pass
@@ -2238,13 +2251,23 @@ def LE_set_initial_render_layer(dummy):
 
 
 @persistent
-def LE_force_redraw_on_use_nodes_change(scene):
-    """Force redraw when use_nodes changes."""
+def LE_redraw_on_shading_change(scene, depsgraph=None):
+    """Redraw the Light Editor when node-driven values change.
+
+    The panel reads emission colour/strength straight off node sockets, which
+    Blender won't otherwise repaint the sidebar for. This used to fire on every
+    depsgraph tick and tag VIEW_3D, PROPERTIES and NODE_EDITOR in every window —
+    i.e. a forced redraw of half the UI on every transform frame. It is now
+    gated on the depsgraph actually reporting a shading change, and only tags
+    the 3D view, which is where this add-on's panels live.
+    """
     try:
-        wm = bpy.context.window_manager
-        for window in wm.windows:
+        if depsgraph is not None:
+            if not any(getattr(u, "is_updated_shading", False) for u in depsgraph.updates):
+                return
+        for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
-                if area.type in {'VIEW_3D', 'PROPERTIES', 'NODE_EDITOR'}:
+                if area.type == 'VIEW_3D':
                     area.tag_redraw()
     except Exception:
         pass  # Silently ignore any errors
@@ -2306,7 +2329,7 @@ def register():
     # Register handlers. Appends are guarded so a partially-failed unregister
     # can't leave duplicates stacked up on the depsgraph.
     for handler_list, handler in (
-        (bpy.app.handlers.depsgraph_update_post, LE_force_redraw_on_use_nodes_change),
+        (bpy.app.handlers.depsgraph_update_post, LE_redraw_on_shading_change),
         (bpy.app.handlers.load_post, LE_clear_handler),
         (bpy.app.handlers.load_post, LE_check_lights_enabled),
         (bpy.app.handlers.depsgraph_update_post, LE_clear_emissive_cache),
@@ -2400,8 +2423,8 @@ def unregister():
     # Remove handlers
     if LE_update_light_enabled_on_visibility_change in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(LE_update_light_enabled_on_visibility_change)
-    if LE_force_redraw_on_use_nodes_change in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(LE_force_redraw_on_use_nodes_change)
+    if LE_redraw_on_shading_change in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(LE_redraw_on_shading_change)
     if LE_clear_handler in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(LE_clear_handler)
     if LE_check_lights_enabled in bpy.app.handlers.load_post:
