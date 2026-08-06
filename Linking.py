@@ -715,20 +715,32 @@ def register():
 
 
 def unregister():
-    del bpy.types.Scene.ll_light_items
-    del bpy.types.Scene.ll_mesh_items
-    del bpy.types.Scene.ll_collection_items
-    del bpy.types.Scene.ll_light_index
-    del bpy.types.Scene.ll_mesh_index
-    del bpy.types.Scene.ll_collection_index
-    del bpy.types.Scene.ll_list_rows
+    # Each step is guarded so one failure can't abort the rest of unregister()
+    # and leave classes registered (which breaks the next enable).
+    for prop in (
+        "ll_light_items", "ll_mesh_items", "ll_collection_items",
+        "ll_light_index", "ll_mesh_index", "ll_collection_index",
+        "ll_list_rows",
+    ):
+        if hasattr(bpy.types.Scene, prop):
+            try:
+                delattr(bpy.types.Scene, prop)
+            except (AttributeError, TypeError):
+                pass
 
-    bpy.utils.unregister_class(LL_PT_Panel)
+    try:
+        bpy.utils.unregister_class(LL_PT_Panel)
+    except (RuntimeError, ValueError):
+        pass
 
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except (RuntimeError, ValueError):
+            pass
 
-    bpy.app.handlers.load_post.remove(LL_clear_handler)
+    if LL_clear_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(LL_clear_handler)
 
 
 
