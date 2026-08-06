@@ -2,7 +2,7 @@ bl_info = {
     "name": "Light Editor",
     "author": "Robert Rioux aka Blender Bob, Rombout Versluijs",
     "location": "3Dview > Light Editor",
-    "version": (2, 4, 5),
+    "version": (2, 4, 6),
     "blender": (4, 2, 0),
     "description": "A Light Editor and Light Linking addon",
     "category": "Object",
@@ -15,11 +15,17 @@ import bpy
 from . import LightEditor
 from . import Linking
 from . import LightGroup
+from . import LightGroup_Helpers
+from . import LightGroup_SetCompNodes
+from . import LightGroup_SetCompNodes_PresetSystem
 
 def register():
     LightEditor.register()
     Linking.register()
     LightGroup.register()
+    LightGroup_Helpers.register()
+    LightGroup_SetCompNodes.register()
+    LightGroup_SetCompNodes_PresetSystem.register()
 
 def unregister():
     # Unregister in reverse order (best practice). Each module is unregistered
