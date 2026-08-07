@@ -362,6 +362,9 @@ class LG_PT_LightGroupPanel(Panel):
             col = row.column(align=True)
             col.operator("lg_editor.add_light_group", icon='ADD', text="")
             col.operator("lg_editor.remove_light_group", icon='REMOVE', text="")
+
+            # Helper menu
+            col.menu("LG_MT_lightgroup_context_menu", icon='DOWNARROW_HLT', text="")
         else:
             col.label(text="No Lightgroups in this Blender version", icon='ERROR')
 

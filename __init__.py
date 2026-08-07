@@ -33,7 +33,7 @@ def unregister():
     # classes they left registered break the next enable with
     # "already registered as a subclass".
     import traceback
-    for module in (LightGroup, Linking, LightEditor):
+    for module in (LightGroup, Linking, LightEditor, LightGroup_Helpers, LightGroup_SetCompNodes, LightGroup_SetCompNodes_PresetSystem):
         try:
             module.unregister()
         except Exception:
